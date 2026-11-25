@@ -140,8 +140,19 @@ const evaluate = async (url: string, evaluation: Evaluation): Promise<ReadonlyAr
     current.registered.push(definition);
     return definition;
   }) as typeof api.workflow;
+  const bot = ((...input: Parameters<typeof api.bot>) => {
+    const current = evaluating.getStore();
+    if (current === undefined || !current.open) {
+      throw new Error(
+        "T3.bot was called after its file finished loading. Call it at the top of the file.",
+      );
+    }
+    const definition = api.bot(...input);
+    current.registered.push(definition);
+    return definition;
+  }) as typeof api.bot;
   Object.assign(globalThis, {
-    T3: { ...t3, workflow },
+    T3: { ...t3, workflow, bot },
     Effect: effect,
     Schema: schema,
     Option: option,

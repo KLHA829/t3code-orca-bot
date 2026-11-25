@@ -52,6 +52,7 @@ import {
   WorkflowForge,
   WorkflowForgeError,
 } from "./WorkflowForge.ts";
+import { bot } from "./bot.ts";
 import { issueReference, noteReference } from "./runReferences.ts";
 import { agent, ask } from "./workflowAgent.ts";
 import * as Workflows from "./Workflows.ts";
@@ -1017,7 +1018,7 @@ const harness = Effect.fnUntraced(function* (store?: typeof WorkflowStore.layer)
       Effect.scoped(Effect.provide(use, engineOf(registered))),
       Effect.forever(Effect.andThen(clock.await, TestClock.adjust("1 second"))),
     );
-  return { counts, failures, latch, boot, agents, forge, clock, database };
+  return { counts, failures, latch, boot, agents, forge, clock, database, directory };
 });
 
 /** The store the engine writes to, for a test to leave what a crash would have left. */
@@ -3736,5 +3737,49 @@ it.effect("one run moving sends a watcher an update about that run, not the whol
         }
       }).pipe(Effect.scoped),
     );
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);
+
+it.effect("a bot carries its purpose and memory into its agent, then replies and remembers", () =>
+  Effect.gen(function* () {
+    const { boot, agents, forge, directory } = yield* harness();
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const purposeFile = path.join(directory, "SOUL.md");
+    const memoryFile = path.join(directory, "MEMORY.md");
+    yield* fileSystem.writeFileString(purposeFile, "Triage issues without changing code.");
+    yield* fileSystem.writeFileString(
+      memoryFile,
+      "# Memory\n\nThe maintainer likes terse reports.",
+    );
+
+    const helper = bot("helper", {
+      project: "project-1",
+      purposeFile,
+      memoryFile,
+    });
+    yield* boot(
+      Effect.gen(function* () {
+        const workflows = yield* Workflows.Workflows;
+        const { runId } = yield* workflows.start("helper", issueAt("42", "2026-01-01T00:00:00Z"), {
+          idempotencyKey: "bot-test",
+        });
+        const started = yield* agents.started(runId, "respond/0");
+        assert.include(started.prompt, "Triage issues without changing code.");
+        assert.include(started.prompt, "The maintainer likes terse reports.");
+        assert.include(started.prompt, "Issue 42");
+        yield* agents.end(runId, "respond/0", {
+          output: {
+            summary: "Triaged the issue.",
+            response: "I can help with this.",
+            memoryNote: "Issue 42 needs a repro.",
+          },
+        });
+        yield* workflows.waitFor(runId, status("completed"));
+      }).pipe(Effect.scoped),
+      [helper],
+    );
+    assert.deepStrictEqual(forge.comments, ["42: I can help with this."]);
+    assert.include(yield* fileSystem.readFileString(memoryFile), "Issue 42 needs a repro.");
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );

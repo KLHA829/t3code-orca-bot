@@ -7,6 +7,7 @@ export * as Option from "effect/Option";
 export * as Schedule from "effect/Schedule";
 export * as Schema from "effect/Schema";
 
+export { bot, BotAgentResult, type BotTrigger } from "./bot.ts";
 export { daily, every, Tick, webhook, WebhookRequest } from "./triggers.ts";
 export { issues, pullRequests } from "./forgeApi.ts";
 export { cancel, runs, signal, signalAll, start, store, withdraw } from "./stepServices.ts";

@@ -42,6 +42,24 @@ Saving checks that the file loads, does not duplicate a workflow name and versio
 
 Dot-files and subfolders are ignored. Keep shared helpers in a subfolder and restart the server after editing an imported file.
 
+## Bots
+
+A bot is a named workflow with a persistent purpose and Markdown memory. Create one for a project with:
+
+```sh
+t3 bot create "Bug triage" --project /path/to/project --purpose "Triage newly opened bugs." --issues
+```
+
+This writes `bots/<name>/SOUL.md`, `bots/<name>/MEMORY.md`, and `workflows/bot-<name>.ts` in the T3 home. Edit `SOUL.md` to change who the bot is and what it may do; the bot reads it again for every job. `MEMORY.md` starts empty and the bot appends only durable facts it chooses to remember — never put secrets in either file. Edit the generated workflow file to change schedules or triggers.
+
+Choose what starts jobs with `--issues`, `--pull-requests`, `--every "1 day"`, `--daily "09:00"`, or `--webhook <name>`. Regardless of triggers, give the bot a direct job with:
+
+```sh
+t3 bot ask bug-triage "Triage the issue labeled regression"
+```
+
+Issue and pull request jobs include the item in the agent's prompt. When the agent returns a response, the bot posts it as one comment on that item after the run finishes. List local bot files with `t3 bot list`; use `t3 workflow` commands to follow, resume, or cancel their runs.
+
 ## Start and steer
 
 ```sh

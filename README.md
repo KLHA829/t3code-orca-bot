@@ -1,3 +1,5 @@
+> **Unofficial fork:** this repository is an independent T3 Code fork with Orca-style bots. It is not affiliated with or endorsed by the T3 Code maintainers; upstream remains [pingdotgg/t3code](https://github.com/pingdotgg/t3code).
+
 <p align="center">
   <a href="https://t3.codes">
     <img src="./assets/prod/t3-black-web-icon-192x192.png" width="80" height="80" alt="T3 Code logo" />
