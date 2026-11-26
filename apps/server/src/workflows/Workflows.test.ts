@@ -3916,6 +3916,143 @@ it.effect("a bot bounds an overlong purpose", () =>
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );
 
+it.effect("a bot retrieves the memory relevant to the job, not only the newest", () =>
+  Effect.gen(function* () {
+    const { boot, agents, directory } = yield* harness();
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const memoryFile = path.join(directory, "MEMORY.md");
+    yield* fileSystem.writeFileString(
+      memoryFile,
+      [
+        "# Memory",
+        "",
+        "## 2026-01-01T00:00:00.000Z",
+        "",
+        "The API token rotation runbook lives in docs/runbooks/tokens.md.",
+        "",
+        "## 2026-01-02T00:00:00.000Z",
+        "",
+        "The maintainer likes terse reports.",
+        "",
+      ].join("\n"),
+    );
+    const helper = bot("helper", {
+      project: "project-1",
+      purpose: "Help with small jobs.",
+      memoryFile,
+    });
+    yield* boot(
+      Effect.gen(function* () {
+        const workflows = yield* Workflows.Workflows;
+        const { runId } = yield* workflows.start(
+          "helper",
+          { message: "how do I rotate the api token?" },
+          { idempotencyKey: "bot-memory-retrieval" },
+        );
+        const started = yield* agents.started(runId, "respond/0");
+        assert.include(started.prompt, "tokens.md");
+        yield* agents.end(runId, "respond/0", {
+          output: { summary: "Answered.", response: "Use the runbook." },
+        });
+        yield* workflows.waitFor(runId, status("completed"));
+      }).pipe(Effect.scoped),
+      [helper],
+    );
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);
+
+it.effect("a bot stops jobs over its daily budget", () =>
+  Effect.gen(function* () {
+    const { boot, agents } = yield* harness();
+    const helper = bot("helper", {
+      project: "project-1",
+      purpose: "Help with small jobs.",
+      maxJobsPerDay: 1,
+    });
+    yield* boot(
+      Effect.gen(function* () {
+        const workflows = yield* Workflows.Workflows;
+        const first = yield* workflows.start(
+          "helper",
+          { message: "first" },
+          { idempotencyKey: "bot-budget-first" },
+        );
+        const started = yield* agents.started(first.runId, "respond/0");
+        assert.isString(started.prompt);
+        yield* agents.end(first.runId, "respond/0", {
+          output: { summary: "Done.", response: "Hi." },
+        });
+        yield* workflows.waitFor(first.runId, status("completed"));
+        const second = yield* workflows.start(
+          "helper",
+          { message: "second" },
+          { idempotencyKey: "bot-budget-second" },
+        );
+        const stopped = yield* workflows.waitFor(second.runId, status("stopped"));
+        assert.include(stopped.detail ?? "", "Daily budget reached");
+      }).pipe(Effect.scoped),
+      [helper],
+    );
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);
+
+it.effect("a bot hands off to a teammate bot", () =>
+  Effect.gen(function* () {
+    const { boot, agents, directory } = yield* harness();
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const botsRoot = path.join(directory, "bots");
+    for (const slug of ["triage", "fixer"]) {
+      yield* fileSystem.makeDirectory(path.join(botsRoot, slug), { recursive: true });
+      yield* fileSystem.writeFileString(path.join(botsRoot, slug, "MEMORY.md"), "# Memory\n");
+    }
+    const triage = bot("triage-bot", {
+      project: "project-1",
+      purpose: "Triage and delegate.",
+      memoryFile: path.join(botsRoot, "triage", "MEMORY.md"),
+    });
+    const fixer = bot("bot-fixer", {
+      project: "project-1",
+      purpose: "Fix things.",
+      memoryFile: path.join(botsRoot, "fixer", "MEMORY.md"),
+    });
+    yield* boot(
+      Effect.gen(function* () {
+        const workflows = yield* Workflows.Workflows;
+        const { runId } = yield* workflows.start(
+          "triage-bot",
+          { message: "the login page crashes" },
+          { idempotencyKey: "bot-handoff" },
+        );
+        const started = yield* agents.started(runId, "respond/0");
+        assert.include(started.prompt, "fixer");
+        yield* agents.end(runId, "respond/0", {
+          output: {
+            summary: "Delegated.",
+            response: "Handed to the fixer.",
+            handoffs: [{ bot: "fixer", message: "Fix the login page crash." }],
+          },
+        });
+        yield* workflows.waitFor(runId, status("completed"));
+        const delegatedRuns = (yield* workflows.list()).filter(
+          (run) => run.workflow === "bot-fixer",
+        );
+        assert.equal(delegatedRuns.length, 1);
+        const delegatedRun = delegatedRuns[0];
+        assert.isDefined(delegatedRun);
+        if (delegatedRun === undefined) return;
+        const delegated = yield* agents.started(delegatedRun.runId, "respond/0");
+        assert.include(delegated.prompt, "Fix the login page crash.");
+        yield* agents.end(delegatedRun.runId, "respond/0", {
+          output: { summary: "Fixed.", response: "Done." },
+        });
+      }).pipe(Effect.scoped),
+      [triage, fixer],
+    );
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);
+
 it.effect("a bot pauses when its purpose file is missing", () =>
   Effect.gen(function* () {
     const { boot, directory } = yield* harness();

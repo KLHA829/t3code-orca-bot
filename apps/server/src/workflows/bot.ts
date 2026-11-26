@@ -11,7 +11,7 @@ import * as Schema from "effect/Schema";
 import { ModelSelection, ProviderInstanceId } from "@t3tools/contracts";
 
 import { issues, pullRequests } from "./forgeApi.ts";
-import { store } from "./stepServices.ts";
+import { Runs, store } from "./stepServices.ts";
 import { checkOptions } from "./options.ts";
 import {
   type OpenedTrigger,
@@ -21,8 +21,20 @@ import {
   WebhookRequest,
   type WebhookTrigger,
 } from "./triggers.ts";
-import { step, tags, title, within, workflow, type WorkflowDefinition } from "./workflow.ts";
-import { agent } from "./workflowAgent.ts";
+import {
+  RunContext,
+  step,
+  stop,
+  tags,
+  title,
+  within,
+  workflow,
+  type WorkflowDefinition,
+} from "./workflow.ts";
+import * as NodeHttp from "node:http";
+import * as NodeHttps from "node:https";
+import { memoryForJob } from "./botMemory.ts";
+import { agent, ask } from "./workflowAgent.ts";
 import type { AgentLaunch, AgentModel } from "./WorkflowAgents.ts";
 import { Issue, PullRequest } from "./WorkflowForge.ts";
 
@@ -38,7 +50,17 @@ export const BotAgentResult = Schema.Struct({
   response: Schema.String,
   /** One durable fact to append to the bot's Markdown memory. Empty appends nothing. */
   memoryNote: Schema.optional(Schema.String),
+  /** Jobs for teammate bots, when the brief lists teammates. At most three are started. */
+  handoffs: Schema.optional(
+    Schema.Array(Schema.Struct({ bot: Schema.String, message: Schema.String })),
+  ),
 });
+
+/** What the bot's reflection pass returns: one generalized lesson, or empty for none. */
+export const BotReflection = Schema.Struct({
+  lesson: Schema.String,
+});
+export type BotReflection = typeof BotReflection.Type;
 export type BotAgentResult = typeof BotAgentResult.Type;
 
 const isIssue = Schema.is(Issue);
@@ -127,11 +149,6 @@ const jsonForPrompt = (value: Schema.Json) => {
 const purposeForPrompt = (purpose: string) =>
   purpose.length <= PURPOSE_CONTEXT_LIMIT ? purpose : purpose.slice(0, PURPOSE_CONTEXT_LIMIT);
 
-const memoryForPrompt = (memory: string) =>
-  memory.length <= MEMORY_CONTEXT_LIMIT
-    ? memory
-    : memory.slice(memory.length - MEMORY_CONTEXT_LIMIT);
-
 const readOptionalFile = async (file: string) => {
   try {
     return await NodeFSP.readFile(file, "utf8");
@@ -145,6 +162,8 @@ const BotContext = Schema.Struct({
   purpose: Schema.String,
   memory: Schema.String,
   model: Schema.optional(ModelSelection),
+  teammates: Schema.Array(Schema.String),
+  jobsToday: Schema.optional(Schema.Number),
 });
 
 class BotContextReadError extends Schema.TaggedError<BotContextReadError>()("BotContextReadError", {
@@ -164,20 +183,36 @@ class BotMemoryWriteError extends Schema.TaggedError<BotMemoryWriteError>()("Bot
   }
 }
 
+class BotNotifyError extends Schema.TaggedError<BotNotifyError>()("BotNotifyError", {
+  cause: Schema.Defect(),
+}) {
+  override get message(): string {
+    return "Could not post the bot's notification.";
+  }
+}
+
 const briefOf = (input: {
   readonly name: string;
   readonly purpose: string;
   readonly memory: string;
   readonly event: BotEvent;
   readonly payload: Schema.Json;
+  readonly teammates: ReadonlyArray<string>;
 }) => `You are ${input.name}, a persistent coding bot running inside T3 Code.
 
 ## Purpose
 ${input.purpose.trim() || "No purpose has been written yet. Ask what the bot should do before making irreversible changes."}
 
 ## Markdown memory
-${memoryForPrompt(input.memory).trim() || "No memory yet."}
-
+${input.memory.trim() || "No memory yet."}
+${
+  input.teammates.length === 0
+    ? ""
+    : `
+## Team
+These teammate bots exist in this T3 home: ${input.teammates.join(", ")}. When part of the job belongs to one of them, hand it off instead of doing it yourself.
+`
+}
 ## Job
 ${input.event.origin}
 
@@ -190,8 +225,8 @@ Do the job in the project. When it needs a decision or approval that you cannot 
 - summary: one sentence for the bot's run list
 - response: for a direct message, the concise reply to the person; otherwise the concise comment to post back where this job came from, or an empty string when nothing should be posted
 - memoryNote: one durable fact worth remembering across future jobs, or omit it when nothing is worth remembering
-
-Do not include transient status in memoryNote. Never post secrets or credentials in response.`;
+${input.teammates.length === 0 ? "" : "- handoffs: at most 3 handoffs as { bot, message }, one per teammate bot that should pick up part of this work. bot is the teammate's name. Omit it when nothing needs handing off.\n"}
+Do not include transient status in memoryNote. Never post secrets or credentials in response. Never merge, force-push, delete branches, or publish releases unless the job explicitly asks for exactly that.`;
 
 /** A trigger a bot can react to. The event payload is decoded by the bot itself. */
 export type BotTrigger = ScheduleTrigger | WebhookTrigger | OpenedTrigger;
@@ -217,6 +252,14 @@ export const bot = (
     readonly triggers?: ReadonlyArray<BotTrigger> | undefined;
     /** Whether to post the agent's response on the originating issue or pull request. */
     readonly postReplies?: boolean | undefined;
+    /** Ask a person to approve each issue or pull request reply before it is posted. */
+    readonly confirmReplies?: boolean | undefined;
+    /** After each job, ask the same agent thread for one generalized lesson and remember it. */
+    readonly reflection?: boolean | undefined;
+    /** Stop jobs once this many have started in one UTC day. */
+    readonly maxJobsPerDay?: number | undefined;
+    /** Post run notifications to this Slack or Discord incoming webhook URL. */
+    readonly notifyWebhook?: string | undefined;
     /** How many jobs this bot works on at once. */
     readonly concurrency?: number | undefined;
     /** How the bot's agent thread runs. */
@@ -240,6 +283,10 @@ export const bot = (
     "memoryFile",
     "triggers",
     "postReplies",
+    "confirmReplies",
+    "reflection",
+    "maxJobsPerDay",
+    "notifyWebhook",
     "concurrency",
     "agent",
   ]);
@@ -259,8 +306,60 @@ export const bot = (
       throw new Error(`bot("${name}") file paths must be absolute, not ${file}.`);
     }
   }
+  if (options.maxJobsPerDay !== undefined) {
+    if (!Number.isInteger(options.maxJobsPerDay) || options.maxJobsPerDay < 1) {
+      throw new Error(`bot("${name}") maxJobsPerDay is a positive whole number.`);
+    }
+  }
+  if (options.notifyWebhook !== undefined) {
+    const protocol = URL.parse(options.notifyWebhook)?.protocol;
+    if (protocol !== "https:" && protocol !== "http:") {
+      throw new Error(`bot("${name}")'s notifyWebhook is an http or https URL.`);
+    }
+  }
 
   const modelStore = store.entry(`bot:${name}:model`, ModelSelection);
+
+  /** Best-effort Slack or Discord incoming-webhook notice, journaled so it posts once. */
+  const notifyStep = (stepName: string, text: string) => {
+    const webhook = options.notifyWebhook;
+    if (webhook === undefined) return Effect.void;
+    return step(
+      stepName,
+      { returns: Schema.Void },
+      // Steps cannot require HttpClient (it is outside the step context), so the webhook goes
+      // out with node:http directly. The post is journaled: a replayed run does not notify twice.
+      Effect.tryPromise({
+        try: () =>
+          new Promise<void>((resolve, reject) => {
+            const url = new URL(webhook);
+            const transport = url.protocol === "https:" ? NodeHttps : NodeHttp;
+            // Slack reads `text`, Discord reads `content`; both ignore the other key.
+            const body = `${JSON.stringify({ text, content: text })}`;
+            const request = transport.request(
+              url,
+              {
+                method: "POST",
+                headers: { "content-type": "application/json", "content-length": body.length },
+                timeout: 10_000,
+              },
+              (response) => {
+                response.resume();
+                response.once("end", () => {
+                  if ((response.statusCode ?? 500) < 300) resolve();
+                  else reject(new Error(`webhook answered ${response.statusCode ?? 500}`));
+                });
+                response.once("error", reject);
+              },
+            );
+            request.once("timeout", () => request.destroy(new Error("webhook timed out")));
+            request.once("error", reject);
+            request.end(body);
+          }),
+        catch: (cause) => new BotNotifyError({ cause }),
+      }).pipe(Effect.ignore),
+    );
+  };
 
   return workflow(
     name,
@@ -296,16 +395,47 @@ export const bot = (
                 memory:
                   options.memoryFile === undefined
                     ? ""
-                    : memoryForPrompt(await readOptionalFile(options.memoryFile)),
+                    : memoryForJob(
+                        await readOptionalFile(options.memoryFile),
+                        `${event.label}\n${event.message ?? ""}\n${event.origin}`,
+                        { maxChars: MEMORY_CONTEXT_LIMIT },
+                      ),
               }),
               catch: (cause) => new BotContextReadError({ cause }),
             });
+            const teammates = yield* Effect.tryPromise({
+              try: async () => {
+                if (options.memoryFile === undefined) return [] as string[];
+                // Generated bots live in bots/<slug>/MEMORY.md; sibling directories are its team.
+                const botDirectory = NodePath.dirname(options.memoryFile);
+                const botsRoot = NodePath.dirname(botDirectory);
+                if (NodePath.basename(botsRoot) !== "bots") return [] as string[];
+                const entries = await NodeFSP.readdir(botsRoot, { withFileTypes: true });
+                const self = NodePath.basename(botDirectory);
+                return entries
+                  .filter((entry) => entry.isDirectory() && entry.name !== self)
+                  .map((entry) => entry.name)
+                  .sort();
+              },
+              catch: () => null,
+            }).pipe(Effect.orElseSucceed(() => [] as string[]));
+            let jobsToday: number | undefined;
+            if (options.maxJobsPerDay !== undefined) {
+              const day = DateTime.formatIso(yield* DateTime.now).slice(0, 10);
+              const jobsStore = store.entry(`bot:${name}:jobs:${day}`, Schema.Number);
+              const count = yield* jobsStore.update(
+                (current) => (Option.getOrUndefined(current) ?? 0) + 1,
+              );
+              jobsToday = Option.getOrUndefined(count) ?? 1;
+            }
             const storedModel = yield* modelStore.update((current) =>
               directModel === null ? undefined : (directModel ?? Option.getOrUndefined(current)),
             );
             const model = directModel ?? Option.getOrUndefined(storedModel) ?? options.agent?.model;
             return {
               ...files,
+              teammates,
+              ...(jobsToday === undefined ? {} : { jobsToday }),
               ...(model === undefined
                 ? {}
                 : {
@@ -318,6 +448,14 @@ export const bot = (
             };
           }),
         );
+        if (
+          options.maxJobsPerDay !== undefined &&
+          (context.jobsToday ?? 0) > options.maxJobsPerDay
+        ) {
+          return yield* stop(
+            `Daily budget reached: ${options.maxJobsPerDay} jobs already started today.`,
+          );
+        }
         const result = yield* agent("respond", {
           project: options.project,
           brief: briefOf({
@@ -326,6 +464,7 @@ export const bot = (
             memory: context.memory,
             event,
             payload,
+            teammates: context.teammates,
           }),
           returns: BotAgentResult,
           ...(isIssue(payload) ? { issue: payload } : {}),
@@ -362,14 +501,99 @@ export const bot = (
           );
         }
 
+        if (options.reflection === true) {
+          const reflection = yield* agent("reflect", {
+            project: options.project,
+            brief: `You just completed a job as ${name}, a persistent coding bot.\n\nThe job: ${event.label}\nWhat you returned: ${result.value.summary}\n\nReflect on how it went. A useful lesson is generalizable: a mistake to avoid, a convention of this project you confirmed, a workflow that worked. Transient status is not a lesson. Return the structured result:\n- lesson: one durable lesson worth remembering, or an empty string when nothing generalizes`,
+            returns: BotReflection,
+            thread: result.thread,
+            ...(context.model === undefined ? {} : { model: context.model }),
+            ...(options.agent?.timeout === undefined ? {} : { timeout: options.agent.timeout }),
+          });
+          const lesson = reflection.value.lesson.trim();
+          if (lesson.length > 0 && options.memoryFile !== undefined) {
+            const memoryFile = options.memoryFile;
+            yield* step(
+              "remember-lesson",
+              { returns: Schema.Void },
+              Effect.gen(function* () {
+                const at = DateTime.formatIso(yield* DateTime.now);
+                yield* Effect.tryPromise({
+                  try: async () => {
+                    await NodeFSP.mkdir(NodePath.dirname(memoryFile), { recursive: true });
+                    await NodeFSP.appendFile(memoryFile, `\n\n## ${at}\n\n${lesson}\n`);
+                  },
+                  catch: (cause) => new BotMemoryWriteError({ file: memoryFile, cause }),
+                });
+              }),
+            );
+          }
+        }
+
         const response = result.value.response.trim();
-        if (response.length > 0 && options.postReplies !== false) {
+        const replyTarget = isIssue(payload) || isPullRequest(payload);
+        let postApproved = true;
+        if (
+          response.length > 0 &&
+          options.postReplies !== false &&
+          options.confirmReplies === true &&
+          replyTarget
+        ) {
+          yield* notifyStep(
+            "notify-approval",
+            `${name} is waiting for reply approval on ${event.label}.`,
+          );
+          const answer = yield* ask("approve-reply", {
+            title: `${name} wants to post this reply on ${event.label}. Post it?`,
+            choices: [
+              { value: "post", description: "Post the reply as written." },
+              { value: "skip", description: "Do not post anything." },
+            ],
+            data: { body: response },
+          });
+          postApproved = Option.isSome(answer) && answer.value.choice === "post";
+        }
+        if (response.length > 0 && options.postReplies !== false && postApproved) {
           if (isIssue(payload)) {
             yield* step("reply", { returns: Schema.Void }, issues.comment(payload, response));
           } else if (isPullRequest(payload)) {
             yield* step("reply", { returns: Schema.Void }, pullRequests.comment(payload, response));
           }
         }
+
+        const slugOf = (botName: string) =>
+          botName.startsWith("bot-") ? botName.slice(4) : botName;
+        const handoffs = (result.value.handoffs ?? [])
+          .filter((handoff) => {
+            const slug = slugOf(handoff.bot);
+            return slug !== "" && context.teammates.includes(slug) && `bot-${slug}` !== name;
+          })
+          .slice(0, 3);
+        if (handoffs.length > 0) {
+          const parentRunId = (yield* RunContext).runId;
+          yield* step(
+            "delegate",
+            { returns: Schema.Void },
+            Effect.gen(function* () {
+              const runsService = yield* Runs;
+              for (const [index, handoff] of handoffs.entries()) {
+                const target = `bot-${slugOf(handoff.bot)}`;
+                yield* runsService
+                  .start(
+                    target,
+                    { message: handoff.message },
+                    { idempotencyKey: `${parentRunId}/handoff/${index}` },
+                  )
+                  .pipe(Effect.ignore);
+              }
+            }),
+          );
+        }
+
+        yield* notifyStep(
+          "notify-completion",
+          `${name} finished ${event.label}: ${result.value.summary}`,
+        );
 
         return {
           summary: result.value.summary,

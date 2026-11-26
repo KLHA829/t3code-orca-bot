@@ -52,7 +52,16 @@ t3 bot create "Bug triage" --project /path/to/project --purpose "Triage newly op
 
 This writes `bots/<name>/SOUL.md`, `bots/<name>/MEMORY.md`, and `workflows/bot-<name>.ts` in the T3 home. Edit `SOUL.md` to change who the bot is and what it may do; the bot reads it again for every job. `MEMORY.md` starts empty and the bot appends only durable facts it chooses to remember — never put secrets in either file. Edit the generated workflow file to change schedules or triggers.
 
-Choose what starts jobs with `--issues`, `--pull-requests`, `--every "1 day"`, `--daily "09:00"`, or `--webhook <name>`. Choose the bot's provider instance and model with `--provider-instance <instance> --model <model>`; without them it uses the server's normal default. To change the model later, edit the generated workflow file's `agent.model`. Regardless of triggers, give the bot a direct job with:
+Choose what starts jobs with `--issues`, `--pull-requests`, `--every "1 day"`, `--daily "09:00"`, or `--webhook <name>`. Start from a ready-made personality with `--template <name>` (`t3 bot templates` lists them: issue triager, PR reviewer, security reviewer, dependency gardener, docs keeper) instead of writing `--purpose` from scratch.
+
+Optional bot behaviors, set at creation or by editing the generated workflow file:
+
+- `--reflect`: after each job the bot reviews how it went and saves one generalizable lesson to its memory.
+- `--confirm-replies`: the bot pauses with its proposed issue/PR reply and waits for your approval before posting it.
+- `--max-jobs-per-day <n>`: a daily budget; once n jobs have started in a day, further jobs stop immediately with the budget reason.
+- `--notify-webhook <url>`: posts a short JSON message to a Slack or Discord webhook when the bot finishes a job or needs a reply approved.
+
+A bot reads back the memories relevant to each job instead of only the newest ones, so long-lived bots keep using old facts. When several bots share one bots directory they see each other as teammates and can hand off work: the agent returns handoffs naming a teammate and a message, and the teammate bot starts its own durable job with that message. Choose the bot's provider instance and model with `--provider-instance <instance> --model <model>`; without them it uses the server's normal default. To change the model later, edit the generated workflow file's `agent.model`. Regardless of triggers, give the bot a direct job with:
 
 ```sh
 t3 bot ask bug-triage "Triage the issue labeled regression"

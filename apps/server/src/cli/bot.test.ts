@@ -18,7 +18,7 @@ import {
   makePersistedServerRuntimeState,
   persistServerRuntimeState,
 } from "../serverRuntimeState.ts";
-import { botCommand, botFileSlug, botSlug, botWorkflowSource } from "./bot.ts";
+import { botCommand, botFileSlug, botSlug, botTemplates, botWorkflowSource } from "./bot.ts";
 
 vi.mock("../auth/EnvironmentAuth.ts", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../auth/EnvironmentAuth.ts")>();
@@ -102,6 +102,71 @@ const runAskCli = (args: ReadonlyArray<string>, call: McpBridge.McpToolSession["
       ),
     ),
   );
+
+it.effect("bot workflow source carries the feature options", () =>
+  Effect.sync(() => {
+    const source = botWorkflowSource({
+      slug: "gardener",
+      project: "/tmp/project",
+      purposeFile: "/tmp/bots/gardener/SOUL.md",
+      memoryFile: "/tmp/bots/gardener/MEMORY.md",
+      issues: false,
+      pullRequests: false,
+      reflection: true,
+      confirmReplies: true,
+      maxJobsPerDay: 5,
+      notifyWebhook: "https://hooks.slack.com/services/test",
+    });
+    assert.include(source, "reflection: true");
+    assert.include(source, "confirmReplies: true");
+    assert.include(source, "maxJobsPerDay: 5");
+    assert.include(source, 'notifyWebhook: "https://hooks.slack.com/services/test"');
+    const plain = botWorkflowSource({
+      slug: "plain",
+      project: "/tmp/project",
+      purposeFile: "/tmp/bots/plain/SOUL.md",
+      memoryFile: "/tmp/bots/plain/MEMORY.md",
+      issues: false,
+      pullRequests: false,
+    });
+    assert.notInclude(plain, "reflection");
+    assert.notInclude(plain, "confirmReplies");
+    assert.notInclude(plain, "maxJobsPerDay");
+    assert.notInclude(plain, "notifyWebhook");
+  }),
+);
+
+it.effect("bot templates have a name, summary and purpose", () =>
+  Effect.sync(() => {
+    for (const [name, template] of Object.entries(botTemplates)) {
+      assert.isAbove(name.length, 2);
+      assert.isAbove(template.summary.length, 20);
+      assert.isAbove(template.purpose.length, 100);
+    }
+    assert.isDefined(botTemplates["dependency-gardener"]);
+  }),
+);
+
+it.effect("bot create with an unknown template is refused", () =>
+  Effect.gen(function* () {
+    const error = yield* runBotCli([
+      "create",
+      "helper",
+      "--project",
+      "project-1",
+      "--template",
+      "missing-template",
+    ]);
+    assert.include(String(error ?? ""), "Unknown template");
+  }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, NetService.layer))),
+);
+
+it.effect("bot create without purpose or template is refused", () =>
+  Effect.gen(function* () {
+    const error = yield* runBotCli(["create", "helper", "--project", "project-1"]);
+    assert.include(String(error ?? ""), "--purpose or --template");
+  }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, NetService.layer))),
+);
 
 it.effect("bot slugs are file-safe and bounded", () =>
   Effect.sync(() => {
