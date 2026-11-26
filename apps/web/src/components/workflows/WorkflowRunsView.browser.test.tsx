@@ -882,7 +882,8 @@ describe("WorkflowRunsView", () => {
       runs: [...otherKinds, run({ runId: "dark", title: "Dark mode", status: "waiting" })],
       questions: [asked("sticky", "intended"), asked("plain"), asked("dark", "feature")],
     });
-  const featureAnswered = () =>
+  const featureAnswered = () => {
+    const rememberedKind = localStorage.getItem(KIND_KEY);
     setup({
       workflows: kindWorkflows,
       runs: [
@@ -891,6 +892,8 @@ describe("WorkflowRunsView", () => {
       ],
       questions: [asked("sticky", "intended"), asked("plain")],
     });
+    if (rememberedKind !== null) localStorage.setItem(KIND_KEY, rememberedKind);
+  };
 
   it("narrows what needs you to one kind of question, and stays there once it is answered", async () => {
     localStorage.removeItem(KIND_KEY);
@@ -1011,8 +1014,8 @@ describe("WorkflowRunsView", () => {
   });
 
   it("keeps a kind remembered from before through answering a run picked from the list", async () => {
-    localStorage.setItem(KIND_KEY, JSON.stringify("feature"));
     kindsAsked();
+    localStorage.setItem(KIND_KEY, JSON.stringify("feature"));
     await using _desktop = await desktop();
     await using screen = await render(page());
 
@@ -1029,7 +1032,6 @@ describe("WorkflowRunsView", () => {
   });
 
   it("opens the run that asks the picked kind, from the row of the run that invoked it", async () => {
-    localStorage.setItem(KIND_KEY, JSON.stringify("feature"));
     setup({
       workflows: kindWorkflows,
       runs: [
@@ -1038,6 +1040,7 @@ describe("WorkflowRunsView", () => {
       ],
       questions: [asked("epic", "intended"), asked("dark", "feature")],
     });
+    localStorage.setItem(KIND_KEY, JSON.stringify("feature"));
     const select = vi.fn();
     await using _desktop = await desktop();
     await using screen = await render(page(null, { select }));
@@ -1050,7 +1053,6 @@ describe("WorkflowRunsView", () => {
   });
 
   it("still shows a run opened by its link in a list that has it, whatever kind was picked before", async () => {
-    localStorage.setItem(KIND_KEY, JSON.stringify("feature"));
     setup({
       workflows: kindWorkflows,
       runs: [
@@ -1059,6 +1061,7 @@ describe("WorkflowRunsView", () => {
       ],
       questions: [asked("sticky", "intended")],
     });
+    localStorage.setItem(KIND_KEY, JSON.stringify("feature"));
     await using _desktop = await desktop();
     await using screen = await render(page("busy"));
 

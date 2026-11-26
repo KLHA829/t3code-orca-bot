@@ -62,7 +62,7 @@ Issue and pull request jobs include the item in the agent's prompt. When the age
 
 The sidebar's **Bots** section lists local bots and opens each one's board. The Workflows page also offers **Bot board** when bot jobs exist: the jobs as cards in Needs you, Working, Done, and Closed lanes. Done and Closed hold that day's endings. A card shows the issues and pull requests its job touched; open the card for the run, its questions, and those links. On mobile, the Workflows tab's **Bots** view shows the same lanes as a vertical list, with chips to narrow it to one bot.
 
-A narrowed bot board includes a conversation box. Send a message there — or use **Chat with …** on mobile — and the bot answers as a durable workflow run. Each message is one run, so you can open it for the agent transcript, answer its questions, resume it, or cancel it. The next message includes recent conversation turns as context, while `MEMORY.md` remains the bot's durable long-term memory. Use the model picker beside the message box to choose the bot's model; the choice is remembered for later bot jobs, and **Bot default** returns to the workflow or server default.
+A narrowed bot board includes a conversation box. Send a message there — or use **Chat with …** on mobile — and the bot answers as a durable workflow run. Each message is one run, so you can open it for the agent transcript, answer its questions, resume it, or cancel it. The next message includes recent conversation turns as context, while `MEMORY.md` remains the bot's durable long-term memory. Use the model picker beside the message box to choose the bot's model; the choice is remembered for later bot jobs, and **Automatic** returns to the workflow or server default.
 
 ## Start and steer
 

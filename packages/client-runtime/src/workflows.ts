@@ -350,6 +350,47 @@ export function workflowBotResponseText(run: WorkflowRun): string | null {
   return null;
 }
 
+/** A bot job title without the bot's own name, which its surrounding card or chat already shows. */
+export function workflowBotRunTitle(run: WorkflowRun): string {
+  const prefix = `${run.workflow}: `;
+  return run.title.startsWith(prefix) ? run.title.slice(prefix.length) : run.title;
+}
+
+/** What a bot job is doing, worded for the board rather than exposing step machinery. */
+export function workflowBotActivityText(
+  node: WorkflowRunNode,
+  resolve: MFunctionType = mFallback,
+): string {
+  if (node.questions.length > 0) return workflowRunNow(node, resolve);
+  if (node.run.status === "paused") {
+    return resolve(msg("Stopped before finishing. Open the job for details."));
+  }
+  return workflowRunNow(node, resolve).replace(/^summary:\s*/, "");
+}
+
+/** What to show in place of a bot reply while it is working, waiting, or ended without one. */
+export function workflowBotChatStatusText(
+  node: WorkflowRunNode,
+  resolve: MFunctionType = mFallback,
+): string {
+  if (node.questions.length > 0) {
+    return resolve(msg("The bot needs your input. Open the job to answer."));
+  }
+  switch (node.run.status) {
+    case "paused":
+      return resolve(msg("The bot stopped before replying. Open the job for details."));
+    case "running":
+    case "waiting":
+      return resolve(msg("The bot is working on it…"));
+    case "completed":
+      return resolve(msg("Done. Open the job for details."));
+    case "stopped":
+    case "skipped":
+    case "cancelled":
+      return resolve(msg("This job ended before the bot replied."));
+  }
+}
+
 /** Direct-message runs of one bot, oldest first. */
 export function workflowBotConversationNodes(
   nodes: ReadonlyArray<WorkflowRunNode>,

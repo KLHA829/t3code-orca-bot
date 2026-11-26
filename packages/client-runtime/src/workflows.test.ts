@@ -20,11 +20,14 @@ import {
   workflowAgentSummary,
   isOwnWorkflowAnswer,
   workflowAnswer,
+  workflowBotActivityText,
+  workflowBotChatStatusText,
   workflowBotConversationInput,
   workflowBotConversationNodes,
   workflowBotLanes,
   workflowBotMessageText,
   workflowBotResponseText,
+  workflowBotRunTitle,
   type WorkflowRunNode,
   workflowWithdrawal,
   workflowChip,
@@ -327,6 +330,41 @@ describe("the list of runs", () => {
         { role: "person", text: "Can you fix it?" },
       ],
     });
+  });
+
+  it("uses bot-friendly wording for cards and chat statuses", () => {
+    const nodeFor = (
+      fields: Partial<WorkflowRun>,
+      questions: WorkflowQuestion[] = [],
+    ): WorkflowRunNode => ({
+      run: run("bot-run", {
+        workflow: "bot-helper",
+        title: "bot-helper: Check the failing job",
+        detail: "respond: internal provider detail",
+        ...fields,
+      }),
+      children: [],
+      questions,
+    });
+
+    const paused = nodeFor({ status: "paused" });
+    expect(workflowBotRunTitle(paused.run)).toBe("Check the failing job");
+    expect(workflowBotActivityText(paused)).toBe(
+      "Stopped before finishing. Open the job for details.",
+    );
+    expect(workflowBotChatStatusText(paused)).toBe(
+      "The bot stopped before replying. Open the job for details.",
+    );
+    expect(workflowBotChatStatusText(nodeFor({ status: "completed" }))).toBe(
+      "Done. Open the job for details.",
+    );
+    expect(workflowBotChatStatusText(pausedWithQuestion())).toBe(
+      "The bot needs your input. Open the job to answer.",
+    );
+
+    function pausedWithQuestion(): WorkflowRunNode {
+      return nodeFor({ status: "running" }, [question("bot-run")]);
+    }
   });
 
   it("counts the open questions by kind, in the order declared, with the rest as other", () => {

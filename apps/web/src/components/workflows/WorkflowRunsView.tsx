@@ -5,7 +5,13 @@ import {
   type WorkflowRunReference,
 } from "@t3tools/contracts";
 import { msg, T, useGT, useMessages } from "gt-react";
-import { LayoutGridIcon, WorkflowIcon } from "lucide-react";
+import {
+  BotIcon,
+  LayoutGridIcon,
+  MessageCircleIcon,
+  SlidersHorizontalIcon,
+  WorkflowIcon,
+} from "lucide-react";
 import * as Schema from "effect/Schema";
 import { useState, type ReactNode } from "react";
 
@@ -48,11 +54,14 @@ import {
   workflowQuestionKinds,
   workflowRunAskingKind,
   workflowRunAsksKind,
+  workflowBotActivityText,
+  workflowBotChatStatusText,
   workflowBotConversationInput,
   workflowBotConversationNodes,
   workflowBotLanes,
   workflowBotMessageText,
   workflowBotResponseText,
+  workflowBotRunTitle,
   workflowRunLists,
   workflowRunNow,
   workflowTriggerLine,
@@ -611,14 +620,11 @@ function BotKanbanBoard({
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div className="flex shrink-0 items-center gap-3 border-b px-4 py-2">
         <div className="min-w-0 flex-1">
-          <h2 className="truncate text-sm font-medium">
-            <T>Bot board</T>
+          <h2 className="truncate text-base font-semibold">
+            <T>Bots</T>
           </h2>
           <p className="truncate text-xs text-muted-foreground">
-            <T>
-              Open bot jobs across this server, grouped by what needs you next. Done and closed
-              lanes hold today’s endings.
-            </T>
+            <T>Chat with a bot and see what needs your attention.</T>
           </p>
         </div>
         {workflow !== null || bots.length === 0 ? null : (
@@ -627,9 +633,10 @@ function BotKanbanBoard({
               if (typeof value === "string" && value !== "") onOpenChat(value);
             }}
           >
-            <SelectTrigger size="sm" variant="ghost" aria-label={gt("Choose a bot to chat with")}>
+            <SelectTrigger size="sm" variant="default" aria-label={gt("Choose a bot to chat with")}>
+              <MessageCircleIcon aria-hidden />
               <SelectValue>
-                <T>Chat</T>
+                <T>Ask a bot</T>
               </SelectValue>
             </SelectTrigger>
             <SelectPopup>
@@ -644,9 +651,9 @@ function BotKanbanBoard({
             </SelectPopup>
           </Select>
         )}
-        <Button size="sm" variant="outline" onClick={onShowRuns}>
+        <Button size="sm" variant="ghost" onClick={onShowRuns}>
           <WorkflowIcon />
-          <T>Runs</T>
+          <T>Activity</T>
         </Button>
       </div>
       {workflow === null ? null : (
@@ -665,15 +672,15 @@ function BotKanbanBoard({
           />
         ) : null
       ) : (
-        <div className="grid min-h-0 flex-1 auto-cols-[minmax(15rem,19rem)] grid-flow-col overflow-x-auto">
+        <div className="grid min-h-0 flex-1 auto-cols-[minmax(15rem,19rem)] grid-flow-col gap-3 overflow-x-auto bg-muted/25 p-3">
           {lanes.map((lane) => (
             <section
               key={lane.id}
               aria-label={lane.title}
-              className="flex min-h-0 flex-col border-e last:border-e-0"
+              className="flex min-h-0 flex-col rounded-xl border bg-background shadow-xs"
             >
-              <header className="flex shrink-0 items-center gap-2 border-b px-3 py-2">
-                <h3 className="min-w-0 flex-1 truncate text-xs font-medium text-muted-foreground">
+              <header className="flex shrink-0 items-center gap-2 border-b px-3 py-2.5">
+                <h3 className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
                   {lane.title}
                 </h3>
                 <span className="rounded-full bg-accent px-1.5 py-0.5 text-xs text-muted-foreground tabular-nums">
@@ -682,8 +689,14 @@ function BotKanbanBoard({
               </header>
               <ScrollArea className="min-h-0 flex-1">
                 {lane.nodes.length === 0 ? (
-                  <p className="px-3 py-6 text-center text-xs text-muted-foreground">
-                    <T>Nothing here.</T>
+                  <p className="px-3 py-8 text-center text-xs text-muted-foreground">
+                    {lane.id === "needs-you"
+                      ? gt("Nothing needs you.")
+                      : lane.id === "working"
+                        ? gt("Bots are idle.")
+                        : lane.id === "done"
+                          ? gt("Nothing finished today.")
+                          : gt("Nothing closed today.")}
                   </p>
                 ) : (
                   <ul className="space-y-2 p-2">
@@ -779,39 +792,66 @@ function BotConversation({
   return (
     <section
       aria-label={gt("Chat with {bot}", { bot: botName })}
-      className="flex max-h-80 shrink-0 flex-col border-b"
+      className="flex max-h-96 shrink-0 flex-col border-b bg-background"
     >
+      <header className="flex shrink-0 items-center gap-3 border-b px-4 py-3">
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+          <BotIcon aria-hidden className="size-4" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-semibold text-foreground">{botName}</span>
+          <span className="block truncate text-xs text-muted-foreground">
+            {gt("Ask for work, updates, or help.")}
+          </span>
+        </span>
+      </header>
       <ScrollArea className="min-h-0 flex-1">
-        <div className="space-y-3 p-4">
+        <div className="mx-auto w-full max-w-3xl space-y-4 px-4 py-4">
           {nodes.length === 0 ? (
-            <p className="py-6 text-center text-sm text-muted-foreground">
-              {gt("Send a job or question. The bot answers as a durable workflow run.")}
-            </p>
+            <div className="mx-auto max-w-sm py-8 text-center">
+              <span className="mx-auto mb-3 flex size-10 items-center justify-center rounded-full bg-primary/10 text-primary">
+                <MessageCircleIcon aria-hidden className="size-5" />
+              </span>
+              <p className="text-sm font-medium text-foreground">
+                {gt("Ask {bot} for help", { bot: botName })}
+              </p>
+              <p className="pt-1 text-sm text-muted-foreground">
+                {gt(
+                  "Type a request below. The bot remembers what it learns and keeps track of the work here.",
+                )}
+              </p>
+            </div>
           ) : (
             nodes.map((node) => {
               const { run } = node;
-              const response = workflowBotResponseText(run);
+              const response = run.status === "completed" ? workflowBotResponseText(run) : null;
               return (
                 <div key={run.runId} className="space-y-2">
-                  <div className="ml-auto w-fit max-w-[85%] rounded-2xl bg-primary px-3 py-2 text-primary-foreground">
+                  <div className="ml-auto w-fit max-w-[85%] rounded-2xl rounded-br-sm bg-primary px-3 py-2 text-primary-foreground shadow-xs">
                     <p className="whitespace-pre-wrap text-sm">{workflowBotMessageText(run)}</p>
                     <p className="pt-1 text-right text-2xs text-primary-foreground/70">
                       <RelativeLabel value={run.startedAt} />
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    className="block w-fit max-w-[85%] cursor-pointer rounded-2xl border bg-card px-3 py-2 text-left hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-inset focus-visible:outline-none"
-                    onClick={() => onOpen(run.runId)}
-                  >
-                    <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                      <WorkflowChip name={workflow} />
-                      <WorkflowStateWord node={node} />
+                  <div className="flex max-w-[85%] items-start gap-2">
+                    <span className="mt-1 flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+                      <BotIcon aria-hidden className="size-3" />
                     </span>
-                    <span className="block whitespace-pre-wrap pt-1 text-sm text-foreground">
-                      {response ?? workflowRunNow(node, m)}
-                    </span>
-                  </button>
+                    <button
+                      type="button"
+                      className="block min-w-0 flex-1 cursor-pointer rounded-2xl rounded-tl-sm border bg-card px-3 py-2 text-left shadow-xs transition-colors hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-inset focus-visible:outline-none"
+                      onClick={() => onOpen(run.runId)}
+                    >
+                      <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <WorkflowStateWord node={node} />
+                        <span aria-hidden>·</span>
+                        <span>{gt("Open details")}</span>
+                      </span>
+                      <span className="block whitespace-pre-wrap pt-1 text-sm text-foreground">
+                        {response ?? workflowBotChatStatusText(node, m)}
+                      </span>
+                    </button>
+                  </div>
                 </div>
               );
             })
@@ -824,63 +864,84 @@ function BotConversation({
           )}
         </div>
       </ScrollArea>
-      <form
-        className="flex shrink-0 items-center gap-2 border-t p-3"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void send();
-        }}
-      >
-        <Select
-          modal={false}
-          value={modelOverride ? encodeBotModel(modelOverride) : BOT_DEFAULT_MODEL_VALUE}
-          onValueChange={(value) => {
-            if (typeof value !== "string") return;
-            setModelOverride(value === BOT_DEFAULT_MODEL_VALUE ? null : decodeBotModel(value));
+      <div className="shrink-0 border-t bg-background px-4 py-3">
+        <form
+          className="mx-auto flex w-full max-w-3xl items-center gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void send();
           }}
         >
-          <SelectTrigger
-            size="sm"
-            variant="ghost"
-            className="w-36 shrink-0"
-            aria-label={gt("Choose the bot model")}
+          <Select
+            modal={false}
+            value={modelOverride ? encodeBotModel(modelOverride) : BOT_DEFAULT_MODEL_VALUE}
+            onValueChange={(value) => {
+              if (typeof value !== "string") return;
+              setModelOverride(value === BOT_DEFAULT_MODEL_VALUE ? null : decodeBotModel(value));
+            }}
           >
-            <SelectValue>
-              {modelOverride ? (selectedModelLabel ?? modelOverride.model) : gt("Bot default")}
-            </SelectValue>
-          </SelectTrigger>
-          <SelectPopup alignItemWithTrigger={false} matchTriggerWidth={false} className="w-64">
-            <SelectItem value={BOT_DEFAULT_MODEL_VALUE}>
-              <T>Bot default</T>
-            </SelectItem>
-            {modelGroups.map(({ provider, models }) => (
-              <SelectGroup key={provider.instanceId}>
-                <SelectGroupLabel>{provider.displayName ?? provider.instanceId}</SelectGroupLabel>
-                {models.map((model) => {
-                  const selection = { instanceId: provider.instanceId, model: model.slug };
-                  return (
-                    <SelectItem key={model.slug} value={encodeBotModel(selection)}>
-                      <span className="block truncate">
-                        {model.name}
-                        {model.isLegacy ? ` · ${gt("legacy")}` : ""}
-                      </span>
-                    </SelectItem>
-                  );
-                })}
-              </SelectGroup>
-            ))}
-          </SelectPopup>
-        </Select>
-        <Input
-          aria-label={gt("Message the bot")}
-          value={draft}
-          onValueChange={setDraft}
-          placeholder={gt("Message {bot}", { bot: botName })}
-        />
-        <Button type="submit" size="sm" disabled={draft.trim() === "" || sending}>
-          {sending ? gt("Sending…") : gt("Send", { $context: "verb, sends the message" })}
-        </Button>
-      </form>
+            <SelectTrigger
+              size="sm"
+              variant="default"
+              className="w-48 shrink-0"
+              aria-label={gt("Choose the bot model")}
+            >
+              <SelectValue>
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <SlidersHorizontalIcon
+                    aria-hidden
+                    className="size-3.5 shrink-0 text-muted-foreground"
+                  />
+                  <span className="shrink-0 text-muted-foreground">{gt("Model")}</span>
+                  <span className="min-w-0 flex-1 truncate font-medium">
+                    {modelOverride ? (selectedModelLabel ?? modelOverride.model) : gt("Automatic")}
+                  </span>
+                </span>
+              </SelectValue>
+            </SelectTrigger>
+            <SelectPopup alignItemWithTrigger={false} matchTriggerWidth={false} className="w-72">
+              <SelectItem value={BOT_DEFAULT_MODEL_VALUE}>
+                <span className="flex min-w-0 flex-col">
+                  <span>
+                    <T>Automatic</T>
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    <T>Use the bot's configured model</T>
+                  </span>
+                </span>
+              </SelectItem>
+              {modelGroups.map(({ provider, models }) => (
+                <SelectGroup key={provider.instanceId}>
+                  <SelectGroupLabel>{provider.displayName ?? provider.instanceId}</SelectGroupLabel>
+                  {models.map((model) => {
+                    const selection = { instanceId: provider.instanceId, model: model.slug };
+                    return (
+                      <SelectItem key={model.slug} value={encodeBotModel(selection)}>
+                        <span className="block truncate">
+                          {model.name}
+                          {model.isLegacy ? ` · ${gt("legacy")}` : ""}
+                        </span>
+                      </SelectItem>
+                    );
+                  })}
+                </SelectGroup>
+              ))}
+            </SelectPopup>
+          </Select>
+          <Input
+            aria-label={gt("Message the bot")}
+            value={draft}
+            onValueChange={setDraft}
+            placeholder={gt("Ask {bot}…", { bot: botName })}
+          />
+          <Button type="submit" size="sm" disabled={draft.trim() === "" || sending}>
+            {sending ? gt("Sending…") : gt("Send", { $context: "verb, sends the message" })}
+          </Button>
+        </form>
+        <p className="mx-auto hidden w-full max-w-3xl pt-1.5 text-2xs text-muted-foreground sm:block">
+          {gt("Your model choice is remembered for future bot jobs.")}
+        </p>
+      </div>
     </section>
   );
 }
@@ -912,9 +973,11 @@ function BotBoardCard({
           <span className="min-w-0 flex-1 truncate">{run.workflow.replace(/^bot-/, "")}</span>
           <WorkflowStateWord node={node} />
         </span>
-        <span className="line-clamp-2 text-sm font-medium text-foreground">{run.title}</span>
+        <span className="line-clamp-2 text-sm font-medium text-foreground">
+          {workflowBotRunTitle(run)}
+        </span>
         <span className="flex min-w-0 gap-1.5 text-xs text-muted-foreground">
-          <span className="min-w-0 flex-1 truncate">{workflowRunNow(node, m)}</span>
+          <span className="min-w-0 flex-1 truncate">{workflowBotActivityText(node, m)}</span>
           <span className="shrink-0">
             <RelativeLabel value={run.updatedAt} />
           </span>

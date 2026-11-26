@@ -1,11 +1,11 @@
 import {
   allWorkflowRunNodes,
   groupWorkflowRuns,
+  workflowBotChatStatusText,
   workflowBotConversationInput,
   workflowBotConversationNodes,
   workflowBotMessageText,
   workflowBotResponseText,
-  workflowRunNow,
   workflowRunState,
   type WorkflowRunNode,
 } from "@t3tools/client-runtime/workflows";
@@ -46,11 +46,15 @@ export type BotChatParams = {
 const botModelPreferenceKey = (environmentId: string, workflow: string) =>
   `${environmentId}:${workflow}`;
 
-const botText = (node: WorkflowRunNode, state: string, now: string, needsYou: boolean) => {
+const botText = (
+  node: WorkflowRunNode,
+  resolve: Parameters<typeof workflowBotChatStatusText>[1],
+) => {
   const { run } = node;
-  if (run.status === "completed") return workflowBotResponseText(run) ?? now;
-  if (needsYou) return state;
-  return workflowBotResponseText(run) ?? now;
+  if (run.status === "completed") {
+    return workflowBotResponseText(run) ?? workflowBotChatStatusText(node, resolve);
+  }
+  return workflowBotChatStatusText(node, resolve);
 };
 
 function ChatBubble(props: {
@@ -118,7 +122,7 @@ export function BotChatRouteScreen({ route }: StaticScreenProps<BotChatParams>) 
   );
   const modelLabel = selectedModel
     ? (selectedModelOption?.label ?? selectedModel.model)
-    : gt("Bot default");
+    : gt("Automatic");
   const groups =
     snapshot === null
       ? null
@@ -177,14 +181,16 @@ export function BotChatRouteScreen({ route }: StaticScreenProps<BotChatParams>) 
                   {gt("Start the conversation")}
                 </Text>
                 <Text className="pt-1 text-center text-sm text-foreground-muted">
-                  {gt("Send a job or question. The bot answers as a durable workflow run.")}
+                  {gt(
+                    "Type a request below. The bot remembers what it learns and keeps track of the work here.",
+                  )}
                 </Text>
               </View>
             ) : (
               turns.map((node) => {
                 const state = workflowRunState(node, m);
                 const needsYou = asking.has(node.run.runId);
-                const response = botText(node, state.word, workflowRunNow(node, m), needsYou);
+                const response = botText(node, m);
                 return (
                   <View key={node.run.runId} className="gap-2">
                     <ChatBubble own>
@@ -305,7 +311,7 @@ export function BotChatModelPickerRouteScreen({ route }: StaticScreenProps<BotCh
   return (
     <View className="flex-1 bg-screen">
       <AppBar
-        title={gt("Bot model")}
+        title={gt("Chat model")}
         onBack={() => navigation.canGoBack() && navigation.goBack()}
       />
       <ScrollView
@@ -316,8 +322,8 @@ export function BotChatModelPickerRouteScreen({ route }: StaticScreenProps<BotCh
           isFirst
           isLast
           selected={selectedModel === null}
-          title={gt("Bot default")}
-          subtitle={gt("Use the model configured by the bot or server.")}
+          title={gt("Automatic")}
+          subtitle={gt("Use the bot's configured model")}
           onPress={() => choose(null)}
         />
         {groups.map((group) => (
