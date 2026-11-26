@@ -52,7 +52,7 @@ t3 bot create "Bug triage" --project /path/to/project --purpose "Triage newly op
 
 This writes `bots/<name>/SOUL.md`, `bots/<name>/MEMORY.md`, and `workflows/bot-<name>.ts` in the T3 home. Edit `SOUL.md` to change who the bot is and what it may do; the bot reads it again for every job. `MEMORY.md` starts empty and the bot appends only durable facts it chooses to remember — never put secrets in either file. Edit the generated workflow file to change schedules or triggers.
 
-Choose what starts jobs with `--issues`, `--pull-requests`, `--every "1 day"`, `--daily "09:00"`, or `--webhook <name>`. Regardless of triggers, give the bot a direct job with:
+Choose what starts jobs with `--issues`, `--pull-requests`, `--every "1 day"`, `--daily "09:00"`, or `--webhook <name>`. Choose the bot's provider instance and model with `--provider-instance <instance> --model <model>`; without them it uses the server's normal default. To change the model later, edit the generated workflow file's `agent.model`. Regardless of triggers, give the bot a direct job with:
 
 ```sh
 t3 bot ask bug-triage "Triage the issue labeled regression"

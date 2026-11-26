@@ -119,6 +119,7 @@ it.effect("a generated bot workflow declares its memory, project, and triggers",
       project: "/repo",
       purposeFile: "/home/.t3/bots/helper/SOUL.md",
       memoryFile: "/home/.t3/bots/helper/MEMORY.md",
+      model: { instanceId: "claudeAgent", model: "claude-sonnet-4-5" },
       issues: true,
       pullRequests: false,
       every: "1 day",
@@ -129,6 +130,10 @@ it.effect("a generated bot workflow declares its memory, project, and triggers",
     assert.include(source, 'project: "/repo"');
     assert.include(source, 'purposeFile: "/home/.t3/bots/helper/SOUL.md"');
     assert.include(source, 'memoryFile: "/home/.t3/bots/helper/MEMORY.md"');
+    assert.include(
+      source,
+      'agent: { model: { instanceId: "claudeAgent", model: "claude-sonnet-4-5" } },',
+    );
     assert.include(source, 'T3.issues.opened({ project: "/repo" })');
     assert.include(source, 'T3.every("1 day")');
     assert.include(source, 'T3.webhook("jobs")');
@@ -148,6 +153,10 @@ it.effect("bot create writes soul, memory, and workflow files without replacing 
       "/repo",
       "--purpose",
       "Triage bugs.",
+      "--provider-instance",
+      "claudeAgent",
+      "--model",
+      "claude-sonnet-4-5",
       "--issues",
       "--base-dir",
       baseDir,
@@ -160,9 +169,11 @@ it.effect("bot create writes soul, memory, and workflow files without replacing 
     const workflowFile = path.join(baseDir, "workflows", "bot-bug-bot.ts");
     assert.include(yield* fs.readFileString(soulFile), "Triage bugs.");
     assert.include(yield* fs.readFileString(memoryFile), "# Bug Bot memory");
+    const workflowSource = yield* fs.readFileString(workflowFile);
+    assert.include(workflowSource, 'T3.issues.opened({ project: "/repo" })');
     assert.include(
-      yield* fs.readFileString(workflowFile),
-      'T3.issues.opened({ project: "/repo" })',
+      workflowSource,
+      'agent: { model: { instanceId: "claudeAgent", model: "claude-sonnet-4-5" } },',
     );
 
     yield* fs.writeFileString(memoryFile, "# Bug Bot memory\n\nKeep me.");

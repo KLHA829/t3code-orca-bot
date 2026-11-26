@@ -3757,6 +3757,7 @@ it.effect("a bot carries its purpose and memory into its agent, then replies and
       project: "project-1",
       purposeFile,
       memoryFile,
+      agent: { model: { instanceId: "claudeAgent", model: "claude-sonnet-4-5" } },
     });
     yield* boot(
       Effect.gen(function* () {
@@ -3765,6 +3766,10 @@ it.effect("a bot carries its purpose and memory into its agent, then replies and
           idempotencyKey: "bot-test",
         });
         const started = yield* agents.started(runId, "respond/0");
+        assert.deepStrictEqual(started.model, {
+          instanceId: "claudeAgent",
+          model: "claude-sonnet-4-5",
+        });
         assert.include(started.prompt, "Triage issues without changing code.");
         assert.include(started.prompt, "The maintainer likes terse reports.");
         assert.include(started.prompt, "Issue 42");
