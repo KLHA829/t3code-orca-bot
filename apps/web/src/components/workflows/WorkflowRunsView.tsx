@@ -1,10 +1,11 @@
 import { type EnvironmentId, type WorkflowRunReference } from "@t3tools/contracts";
 import { msg, T, useGT, useMessages } from "gt-react";
-import { WorkflowIcon } from "lucide-react";
+import { LayoutGridIcon, WorkflowIcon } from "lucide-react";
 import * as Schema from "effect/Schema";
 import { useState, type ReactNode } from "react";
 
 import { useLocalStorage } from "../../hooks/useLocalStorage";
+import { useNowMinute } from "../../hooks/useNowMinute";
 import { cn } from "../../lib/utils";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
@@ -20,6 +21,7 @@ import {
   WorkflowStateWord,
   type WorkflowThreadTarget,
 } from "./WorkflowRunFeed";
+import { WorkflowReferenceMark } from "./WorkflowReferences";
 import type { WorkflowPaneTab } from "./workflowPane.logic";
 import {
   allWorkflowRunNodes,
@@ -36,6 +38,7 @@ import {
   type WorkflowListTab,
   type WorkflowRunNode,
   workflowRunInvolves,
+  workflowReferenceLabel,
 } from "@t3tools/client-runtime/workflows";
 
 const WORKFLOWS_GUIDE_URL = "https://github.com/pingdotgg/t3code/blob/main/docs/user/workflows.md";
@@ -108,6 +111,8 @@ export function WorkflowRunsView({
   const gt = useGT();
   const m = useMessages();
   const [showSkipped, setShowSkipped] = useState(false);
+  const [board, setBoard] = useState(false);
+  const nowMinute = useNowMinute();
   const snapshot = live.data;
   if (live.error) {
     return <WorkflowsEmpty title={gt("Could not load workflow runs")} description={live.error} />;
@@ -276,7 +281,47 @@ export function WorkflowRunsView({
     const row = kind === EVERY_KIND ? undefined : listed.find((node) => node.run.runId === runId);
     onSelect((row === undefined ? null : askingKind([row], kind)?.run.runId) ?? runId);
   };
+  const isBot = (node: WorkflowRunNode) => node.run.tags?.includes("bot") === true;
+  const botNeeds = lists["needs-you"].filter(isBot);
+  const needing = new Set(botNeeds.map((node) => node.run.runId));
+  const botWorking = lists.running.filter((node) => isBot(node) && !needing.has(node.run.runId));
+  const startOfToday = new Date(Date.parse(`${nowMinute}:00.000Z`));
+  startOfToday.setHours(0, 0, 0, 0);
+  const endedToday = (node: WorkflowRunNode) =>
+    node.run.endedAt !== null && Date.parse(node.run.endedAt) >= startOfToday.getTime();
+  const botDone = lists.all.filter(
+    (node) => isBot(node) && node.run.status === "completed" && endedToday(node),
+  );
+  const botClosed = lists.all.filter(
+    (node) =>
+      isBot(node) &&
+      (node.run.status === "stopped" || node.run.status === "cancelled") &&
+      endedToday(node),
+  );
+  const botCount = new Set(
+    [...botNeeds, ...botWorking, ...botDone, ...botClosed].map((node) => node.run.runId),
+  ).size;
+  const openBoardRun = (runId: string) => {
+    setBoard(false);
+    onSelect(runId);
+  };
   const currentRunId = listedFor(shown);
+  if (board) {
+    return (
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {problemAlert}
+        <BotKanbanBoard
+          needsYou={botNeeds}
+          working={botWorking}
+          done={botDone}
+          closed={botClosed}
+          environmentId={environmentId}
+          onOpen={openBoardRun}
+          onShowRuns={() => setBoard(false)}
+        />
+      </div>
+    );
+  }
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {problemAlert}
@@ -305,6 +350,12 @@ export function WorkflowRunsView({
                 </Toggle>
               ))}
             </ToggleGroup>
+            {botCount === 0 ? null : (
+              <Button size="sm" variant="outline" className="w-full" onClick={() => setBoard(true)}>
+                <LayoutGridIcon />
+                <T>Bot board</T>
+              </Button>
+            )}
             {groups.workflows.length > 1 ? (
               <Select
                 value={workflow}
@@ -476,6 +527,154 @@ function WorkflowRunListItem({
             <RelativeLabel value={run.updatedAt} />
           </span>
         </span>
+      </button>
+    </li>
+  );
+}
+
+/** Bot runs as lanes: what needs a person, what is going, and what ended today or before. */
+function BotKanbanBoard({
+  environmentId,
+  needsYou,
+  working,
+  done,
+  closed,
+  onOpen,
+  onShowRuns,
+}: {
+  readonly environmentId: EnvironmentId;
+  readonly needsYou: ReadonlyArray<WorkflowRunNode>;
+  readonly working: ReadonlyArray<WorkflowRunNode>;
+  readonly done: ReadonlyArray<WorkflowRunNode>;
+  readonly closed: ReadonlyArray<WorkflowRunNode>;
+  readonly onOpen: (runId: string) => void;
+  readonly onShowRuns: () => void;
+}) {
+  const gt = useGT();
+  const lanes = [
+    { id: "needs-you", title: gt("Needs you"), nodes: needsYou },
+    { id: "working", title: gt("Working"), nodes: working },
+    { id: "done", title: gt("Done"), nodes: done },
+    { id: "closed", title: gt("Closed"), nodes: closed },
+  ] as const;
+  const count = needsYou.length + working.length + done.length + closed.length;
+  return (
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div className="flex shrink-0 items-center gap-3 border-b px-4 py-2">
+        <div className="min-w-0 flex-1">
+          <h2 className="truncate text-sm font-medium">
+            <T>Bot board</T>
+          </h2>
+          <p className="truncate text-xs text-muted-foreground">
+            <T>
+              Open bot jobs across this server, grouped by what needs you next. Done and closed
+              lanes hold today’s endings.
+            </T>
+          </p>
+        </div>
+        <Button size="sm" variant="outline" onClick={onShowRuns}>
+          <WorkflowIcon />
+          <T>Runs</T>
+        </Button>
+      </div>
+      {count === 0 ? (
+        <WorkflowsEmpty
+          title={gt("No bot jobs yet")}
+          description={gt("Create a bot with `t3 bot create`, then ask it for a job.")}
+        />
+      ) : (
+        <div className="grid min-h-0 flex-1 auto-cols-[minmax(15rem,19rem)] grid-flow-col overflow-x-auto">
+          {lanes.map((lane) => (
+            <section
+              key={lane.id}
+              aria-label={lane.title}
+              className="flex min-h-0 flex-col border-e last:border-e-0"
+            >
+              <header className="flex shrink-0 items-center gap-2 border-b px-3 py-2">
+                <h3 className="min-w-0 flex-1 truncate text-xs font-medium text-muted-foreground">
+                  {lane.title}
+                </h3>
+                <span className="rounded-full bg-accent px-1.5 py-0.5 text-xs text-muted-foreground tabular-nums">
+                  {lane.nodes.length}
+                </span>
+              </header>
+              <ScrollArea className="min-h-0 flex-1">
+                {lane.nodes.length === 0 ? (
+                  <p className="px-3 py-6 text-center text-xs text-muted-foreground">
+                    <T>Nothing here.</T>
+                  </p>
+                ) : (
+                  <ul className="space-y-2 p-2">
+                    {lane.nodes.map((node) => (
+                      <BotBoardCard
+                        key={node.run.runId}
+                        environmentId={environmentId}
+                        node={node}
+                        onOpen={onOpen}
+                      />
+                    ))}
+                  </ul>
+                )}
+              </ScrollArea>
+            </section>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BotBoardCard({
+  environmentId,
+  node,
+  onOpen,
+}: {
+  readonly environmentId: EnvironmentId;
+  readonly node: WorkflowRunNode;
+  readonly onOpen: (runId: string) => void;
+}) {
+  const m = useMessages();
+  const { run } = node;
+  const detail = useEnvironmentQuery(
+    serverEnvironment.workflowRun({ environmentId, input: { runId: run.runId } }),
+  );
+  const references = detail.data?.references ?? [];
+  return (
+    <li>
+      <button
+        type="button"
+        className="flex w-full cursor-pointer flex-col gap-1 rounded-xl border bg-card px-3 py-2 text-left shadow-xs transition-colors hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-inset focus-visible:outline-none"
+        onClick={() => onOpen(run.runId)}
+      >
+        <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+          <WorkflowChip name={run.workflow} />
+          <span className="min-w-0 flex-1 truncate">{run.workflow.replace(/^bot-/, "")}</span>
+          <WorkflowStateWord node={node} />
+        </span>
+        <span className="line-clamp-2 text-sm font-medium text-foreground">{run.title}</span>
+        <span className="flex min-w-0 gap-1.5 text-xs text-muted-foreground">
+          <span className="min-w-0 flex-1 truncate">{workflowRunNow(node, m)}</span>
+          <span className="shrink-0">
+            <RelativeLabel value={run.updatedAt} />
+          </span>
+        </span>
+        {references.length === 0 ? null : (
+          <span className="flex min-w-0 flex-wrap items-center gap-1 pt-0.5">
+            {references.slice(0, 3).map((reference) => (
+              <span
+                key={`${reference.kind}:${reference.key}`}
+                className="inline-flex min-w-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-2xs text-muted-foreground"
+              >
+                <WorkflowReferenceMark reference={reference} />
+                <span className="shrink-0">{workflowReferenceLabel(reference)}</span>
+                {reference.state === null ? null : <span>{reference.state}</span>}
+              </span>
+            ))}
+            {references.length <= 3 ? null : (
+              <span className="text-2xs text-muted-foreground">+{references.length - 3}</span>
+            )}
+          </span>
+        )}
       </button>
     </li>
   );

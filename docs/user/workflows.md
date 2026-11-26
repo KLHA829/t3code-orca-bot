@@ -60,6 +60,8 @@ t3 bot ask bug-triage "Triage the issue labeled regression"
 
 Issue and pull request jobs include the item in the agent's prompt. When the agent returns a response, the bot posts it as one comment on that item after the run finishes. List local bot files with `t3 bot list`; use `t3 workflow` commands to follow, resume, or cancel their runs.
 
+When bot jobs exist, the Workflows page offers **Bot board**: the jobs as cards in Needs you, Working, Done, and Closed lanes. Done and Closed hold that day's endings. A card shows the issues and pull requests its job touched; open the card for the run, its questions, and those links.
+
 ## Start and steer
 
 ```sh

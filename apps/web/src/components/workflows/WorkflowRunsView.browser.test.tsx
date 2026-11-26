@@ -12,6 +12,7 @@ import { page as browserPage, userEvent } from "vite-plus/test/browser";
 
 import "~/index.css";
 import { render } from "../../../test/render";
+import { useNowMinute } from "../../hooks/useNowMinute";
 import type { WorkflowPaneTab } from "./workflowPane.logic";
 import { WorkflowRunsView } from "./WorkflowRunsView";
 
@@ -83,6 +84,7 @@ function setup(
 
 const environment = { environmentId, label: "Laptop" };
 
+vi.mock("../../hooks/useNowMinute", { spy: true });
 vi.mock(import("../../state/server"), async (original) => {
   const actual = await original();
   const permissionAtom = () => (state.permitted ? canOperate : cannotOperate);
@@ -175,6 +177,17 @@ const issue101: WorkflowRunReference = {
   origin: "trigger",
 };
 
+const pullRequest7: WorkflowRunReference = {
+  kind: "pullRequest",
+  key: "pr7",
+  address: { projectId: "p1", repository: "me/app", number: 7 },
+  title: "Fix wrong minutes",
+  url: "https://github.com/me/app/pull/7",
+  state: "open",
+  steps: ["implement"],
+  origin: "step",
+};
+
 /** Wide enough for the list and the run side by side; put back when the test ends. */
 async function desktop() {
   const width = window.innerWidth;
@@ -247,6 +260,60 @@ describe("WorkflowRunsView", () => {
         ],
       ]),
     );
+  });
+
+  it("groups bot runs as a board and opens one back in the run list", async () => {
+    setup(
+      {
+        runs: [
+          run({
+            runId: "needs",
+            workflow: "bot-triage",
+            title: "Needs an answer",
+            status: "waiting",
+            tags: ["bot", "bot:issue"],
+          }),
+          run({
+            runId: "work",
+            workflow: "bot-triage",
+            title: "Fix wrong minutes",
+            tags: ["bot", "bot:issue"],
+          }),
+          run({
+            runId: "done",
+            workflow: "bot-triage",
+            title: "Finished triage",
+            status: "completed",
+            endedAt: at(12),
+            tags: ["bot", "bot:issue"],
+          }),
+          run({ runId: "ordinary", title: "Not a bot" }),
+        ],
+        questions: [{ ...question, runId: "needs" }],
+      },
+      {},
+      { work: [pullRequest7] },
+    );
+    const select = vi.fn();
+    vi.mocked(useNowMinute).mockReturnValue("2026-11-01T00:30");
+    await using _desktop = await desktop();
+    await using screen = await render(page(null, { select }));
+
+    await screen.getByRole("button", { name: "Bot board" }).click();
+
+    const needsYou = screen.getByRole("region", { name: "Needs you" });
+    const working = screen.getByRole("region", { name: "Working" });
+    const done = screen.getByRole("region", { name: "Done" });
+    await expect.element(needsYou).toMatchTextContent("Needs an answer");
+    await expect.element(working).toMatchTextContent(/Fix wrong minutes.*#7.*open/);
+    await expect.element(done).toMatchTextContent("Finished triage");
+    await expect.element(screen.getByText("Not a bot")).not.toBeInTheDocument();
+
+    await working.getByRole("button", { name: /Fix wrong minutes/ }).click();
+
+    expect(select).toHaveBeenCalledWith("work");
+    await expect.element(screen.getByRole("navigation", { name: "Workflow runs" })).toBeVisible();
+    vi.mocked(useNowMinute).mockRestore();
   });
 
   it("shows what choices do and the links, and sends a choice that needs a reason only with one", async () => {
