@@ -364,6 +364,77 @@ describe("WorkflowRunsView", () => {
     await expect.element(screen.getByText("Release job")).not.toBeInTheDocument();
   });
 
+  it("shows direct bot jobs as a conversation and sends the next one with its recent history", async () => {
+    setup({
+      workflows: [{ name: "bot-triage", version: 1, triggers: [] }],
+      runs: [
+        run({
+          runId: "first",
+          workflow: "bot-triage",
+          title: "bot-triage: What is broken?",
+          status: "completed",
+          startedAt: at(1),
+          updatedAt: at(2),
+          endedAt: at(2),
+          tags: ["bot", "bot:message"],
+          result: { summary: "Explained the failure.", response: "The build is missing an asset." },
+        }),
+        run({
+          runId: "second",
+          workflow: "bot-triage",
+          title: "bot-triage: Can you fix it?",
+          startedAt: at(3),
+          updatedAt: at(3),
+          tags: ["bot", "bot:message"],
+        }),
+      ],
+      questions: [],
+    });
+    await using _desktop = await desktop();
+    await using screen = await render(page(null, {}, null, "bot-triage"));
+
+    const chat = screen.getByRole("region", { name: "Chat with triage" });
+    await expect.element(chat).toMatchTextContent("What is broken?");
+    await expect.element(chat).toMatchTextContent("The build is missing an asset.");
+    await expect.element(chat).toMatchTextContent("Can you fix it?");
+    await userEvent.fill(screen.getByRole("textbox", { name: "Message the bot" }), "What changed?");
+    await screen.getByRole("button", { name: "Send", exact: true }).click();
+
+    await vi.waitFor(() => expect(state.commands).toHaveLength(1));
+    const [label, input] = state.commands[0]!;
+    expect(label).toBe("bot chat send");
+    expect(input).toMatchObject({
+      workflow: "bot-triage",
+      input: {
+        message: "What changed?",
+        conversation: [
+          { role: "person", text: "What is broken?" },
+          { role: "bot", text: "The build is missing an asset." },
+          { role: "person", text: "Can you fix it?" },
+        ],
+      },
+    });
+    expect((input as { readonly idempotencyKey: string }).idempotencyKey).toMatch(/^chat\//);
+  });
+
+  it("opens a bot conversation from the shared board", async () => {
+    setup({
+      workflows: [
+        { name: "bot-release", version: 1, triggers: [] },
+        { name: "bot-triage", version: 1, triggers: [] },
+      ],
+      runs: [],
+      questions: [],
+    });
+    await using _desktop = await desktop();
+    await using screen = await render(page(null, {}, null, "all"));
+
+    await screen.getByRole("combobox", { name: "Choose a bot to chat with" }).click();
+    await screen.getByRole("option", { name: /triage/ }).click();
+
+    await expect.element(screen.getByRole("region", { name: "Chat with triage" })).toBeVisible();
+  });
+
   it("shows what choices do and the links, and sends a choice that needs a reason only with one", async () => {
     setup(
       {

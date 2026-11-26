@@ -17,7 +17,7 @@ import {
   WebhookRequest,
   type WebhookTrigger,
 } from "./triggers.ts";
-import { step, tags, title, workflow, type WorkflowDefinition } from "./workflow.ts";
+import { step, tags, title, within, workflow, type WorkflowDefinition } from "./workflow.ts";
 import { agent } from "./workflowAgent.ts";
 import type { AgentLaunch, AgentModel } from "./WorkflowAgents.ts";
 import { Issue, PullRequest } from "./WorkflowForge.ts";
@@ -45,6 +45,7 @@ interface BotEvent {
   readonly kind: "issue" | "pullRequest" | "webhook" | "schedule" | "message";
   readonly label: string;
   readonly origin: string;
+  readonly message?: string | undefined;
 }
 
 const eventOf = (payload: Schema.Json): BotEvent => {
@@ -88,6 +89,7 @@ const eventOf = (payload: Schema.Json): BotEvent => {
     kind: "message",
     label: directMessage === "" ? "message" : directMessage.slice(0, 80),
     origin: "A person asked the bot directly.",
+    message: directMessage,
   };
 };
 
@@ -155,10 +157,10 @@ Payload, as JSON:
 \`\`\`json
 ${jsonForPrompt(input.payload)}
 \`\`\`
-
+${input.event.kind === "message" ? "\nFor this direct message, payload.message is the person's new message. payload.conversation, when present, is the recent direct-message history, oldest first.\n" : ""}
 Do the job in the project. When it needs a decision or approval that you cannot safely make, stop and explain what is needed instead of guessing. Return the structured result:
 - summary: one sentence for the bot's run list
-- response: the concise comment to post back where this job came from, or an empty string when nothing should be posted
+- response: for a direct message, the concise reply to the person; otherwise the concise comment to post back where this job came from, or an empty string when nothing should be posted
 - memoryNote: one durable fact worth remembering across future jobs, or omit it when nothing is worth remembering
 
 Do not include transient status in memoryNote. Never post secrets or credentials in response.`;
@@ -236,83 +238,95 @@ export const bot = (
       version: options.version ?? 1,
       payload: Schema.Json,
       triggers: (options.triggers ?? []) as ReadonlyArray<Trigger<Schema.Json>>,
-      // One job at a time by default keeps the bot's memory in the order it learned it.
-      concurrency: options.concurrency ?? 1,
     },
     Effect.fn(function* (payload) {
       const event = eventOf(payload);
       yield* title(`${name}: ${event.label}`);
       yield* tags(["bot", `bot:${event.kind}`]);
-      const context = yield* step(
-        "context",
-        { returns: BotContext },
-        Effect.tryPromise({
-          try: async () => ({
-            purpose: [
-              options.purpose ?? "",
-              options.purposeFile === undefined ? "" : await readOptionalFile(options.purposeFile),
-            ]
-              .filter((part) => part.trim().length > 0)
-              .join("\n\n"),
-            memory:
-              options.memoryFile === undefined ? "" : await readOptionalFile(options.memoryFile),
-          }),
-          catch: (cause) => new BotContextReadError({ cause }),
-        }),
-      );
-      const result = yield* agent("respond", {
-        project: options.project,
-        brief: briefOf({ name, purpose: context.purpose, memory: context.memory, event, payload }),
-        returns: BotAgentResult,
-        ...(isIssue(payload) ? { issue: payload } : {}),
-        ...(options.agent?.model === undefined ? {} : { model: options.agent.model }),
-        ...(options.agent?.environment === undefined
-          ? {}
-          : { environment: options.agent.environment }),
-        ...(options.agent?.timeout === undefined ? {} : { timeout: options.agent.timeout }),
-        ...(options.agent?.workspace === undefined ? {} : { workspace: options.agent.workspace }),
-        ...(options.agent?.runtimeMode === undefined
-          ? {}
-          : { runtimeMode: options.agent.runtimeMode }),
-        ...(options.agent?.interactionMode === undefined
-          ? {}
-          : { interactionMode: options.agent.interactionMode }),
-      });
-
-      const memoryNote = result.value.memoryNote?.trim() ?? "";
-      if (memoryNote.length > 0 && options.memoryFile !== undefined) {
-        const memoryFile = options.memoryFile;
-        yield* step(
-          "remember",
-          { returns: Schema.Void },
-          Effect.gen(function* () {
-            const at = DateTime.formatIso(yield* DateTime.now);
-            yield* Effect.tryPromise({
-              try: async () => {
-                await NodeFSP.mkdir(NodePath.dirname(memoryFile), { recursive: true });
-                await NodeFSP.appendFile(memoryFile, `\n\n## ${at}\n\n${memoryNote}\n`);
-              },
-              catch: (cause) => new BotMemoryWriteError({ file: memoryFile, cause }),
-            });
+      // Tag and name direct jobs before they queue, so a chat message stays visible while the bot is busy.
+      const work = Effect.gen(function* () {
+        const context = yield* step(
+          "context",
+          { returns: BotContext },
+          Effect.tryPromise({
+            try: async () => ({
+              purpose: [
+                options.purpose ?? "",
+                options.purposeFile === undefined
+                  ? ""
+                  : await readOptionalFile(options.purposeFile),
+              ]
+                .filter((part) => part.trim().length > 0)
+                .join("\n\n"),
+              memory:
+                options.memoryFile === undefined ? "" : await readOptionalFile(options.memoryFile),
+            }),
+            catch: (cause) => new BotContextReadError({ cause }),
           }),
         );
-      }
+        const result = yield* agent("respond", {
+          project: options.project,
+          brief: briefOf({
+            name,
+            purpose: context.purpose,
+            memory: context.memory,
+            event,
+            payload,
+          }),
+          returns: BotAgentResult,
+          ...(isIssue(payload) ? { issue: payload } : {}),
+          ...(options.agent?.model === undefined ? {} : { model: options.agent.model }),
+          ...(options.agent?.environment === undefined
+            ? {}
+            : { environment: options.agent.environment }),
+          ...(options.agent?.timeout === undefined ? {} : { timeout: options.agent.timeout }),
+          ...(options.agent?.workspace === undefined ? {} : { workspace: options.agent.workspace }),
+          ...(options.agent?.runtimeMode === undefined
+            ? {}
+            : { runtimeMode: options.agent.runtimeMode }),
+          ...(options.agent?.interactionMode === undefined
+            ? {}
+            : { interactionMode: options.agent.interactionMode }),
+        });
 
-      const response = result.value.response.trim();
-      if (response.length > 0 && options.postReplies !== false) {
-        if (isIssue(payload)) {
-          yield* step("reply", { returns: Schema.Void }, issues.comment(payload, response));
-        } else if (isPullRequest(payload)) {
-          yield* step("reply", { returns: Schema.Void }, pullRequests.comment(payload, response));
+        const memoryNote = result.value.memoryNote?.trim() ?? "";
+        if (memoryNote.length > 0 && options.memoryFile !== undefined) {
+          const memoryFile = options.memoryFile;
+          yield* step(
+            "remember",
+            { returns: Schema.Void },
+            Effect.gen(function* () {
+              const at = DateTime.formatIso(yield* DateTime.now);
+              yield* Effect.tryPromise({
+                try: async () => {
+                  await NodeFSP.mkdir(NodePath.dirname(memoryFile), { recursive: true });
+                  await NodeFSP.appendFile(memoryFile, `\n\n## ${at}\n\n${memoryNote}\n`);
+                },
+                catch: (cause) => new BotMemoryWriteError({ file: memoryFile, cause }),
+              });
+            }),
+          );
         }
-      }
 
-      return {
-        summary: result.value.summary,
-        response: result.value.response,
-        event: event.kind,
-        thread: result.thread,
-      };
+        const response = result.value.response.trim();
+        if (response.length > 0 && options.postReplies !== false) {
+          if (isIssue(payload)) {
+            yield* step("reply", { returns: Schema.Void }, issues.comment(payload, response));
+          } else if (isPullRequest(payload)) {
+            yield* step("reply", { returns: Schema.Void }, pullRequests.comment(payload, response));
+          }
+        }
+
+        return {
+          summary: result.value.summary,
+          response: result.value.response,
+          event: event.kind,
+          ...(event.message === undefined ? {} : { message: event.message }),
+          thread: result.thread,
+        };
+      });
+      // One job at a time by default keeps the bot's memory in the order it learned it.
+      return yield* within(name, { limit: options.concurrency ?? 1 }, work);
     }),
   );
 };

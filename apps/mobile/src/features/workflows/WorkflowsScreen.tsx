@@ -25,6 +25,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { RelativeTime } from "../../components/RelativeTime";
 import { AppText as Text } from "../../components/ui/AppText";
+import { Button } from "../../components/ui/Button";
 import { Chip } from "../../components/ui/Chip";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { ScreenScrollView } from "../../components/ui/ScreenScrollView";
@@ -125,6 +126,7 @@ function EnvironmentBotRuns(props: {
   readonly workflows: WorkflowRunsSnapshot["workflows"];
   readonly lists: Readonly<Record<WorkflowListTab, ReadonlyArray<WorkflowRunNode>>>;
   readonly openRun: (node: WorkflowRunNode) => () => void;
+  readonly openChat: (workflow: string) => () => void;
   readonly bot: string | null;
   readonly onBotChange: (bot: string | null) => void;
 }) {
@@ -174,6 +176,16 @@ function EnvironmentBotRuns(props: {
             />
           ))}
         </ScrollView>
+      )}
+      {bot === null ? null : (
+        <View className="px-5 pt-2">
+          <Button
+            label={gt("Chat with {bot}", { bot: bot.replace(/^bot-/, "") })}
+            icon="text.bubble"
+            fullWidth
+            onPress={props.openChat(bot)}
+          />
+        </View>
       )}
       {sections.length === 0 ? (
         <View className="px-5 py-6">
@@ -248,6 +260,9 @@ function EnvironmentRuns(props: {
         workflows={snapshot.workflows}
         lists={lists}
         openRun={openRun}
+        openChat={(workflow) => () =>
+          navigation.navigate("BotChat", { environmentId: props.environmentId, workflow })
+        }
         bot={props.bot}
         onBotChange={props.onBotChange}
       />

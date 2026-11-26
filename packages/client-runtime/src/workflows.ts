@@ -318,6 +318,79 @@ export function workflowBotLanes(
   };
 }
 
+/** The person's message as a direct bot run's title holds it. */
+export function workflowBotMessageText(run: WorkflowRun): string {
+  const prefix = `${run.workflow}: `;
+  return (
+    workflowBotResultText(run, "message") ??
+    (run.title.startsWith(prefix) ? run.title.slice(prefix.length) : run.title)
+  );
+}
+
+const workflowBotResultText = (
+  run: WorkflowRun,
+  key: "message" | "response" | "summary",
+): string | null => {
+  const result = run.result;
+  if (typeof result !== "object" || result === null || Array.isArray(result)) return null;
+  const value = (result as Record<string, unknown>)[key];
+  return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
+};
+
+/** What the bot said back, when its run has one. A stopped run's own detail is the next best thing. */
+export function workflowBotResponseText(run: WorkflowRun): string | null {
+  if (run.status === "completed") {
+    return workflowBotResultText(run, "response") ?? workflowBotResultText(run, "summary");
+  }
+  if (run.status !== "running" && run.status !== "waiting") {
+    const detail = run.detail?.trim() ?? "";
+    return detail === "" ? null : detail;
+  }
+  return null;
+}
+
+/** Direct-message runs of one bot, oldest first. */
+export function workflowBotConversationNodes(
+  nodes: ReadonlyArray<WorkflowRunNode>,
+  workflow: string,
+): ReadonlyArray<WorkflowRunNode> {
+  return nodes
+    .filter(
+      (node) => node.run.workflow === workflow && node.run.tags?.includes("bot:message") === true,
+    )
+    .sort((left, right) => left.run.startedAt.localeCompare(right.run.startedAt));
+}
+
+const BOT_HISTORY_RUNS = 8;
+const BOT_HISTORY_TEXT_LIMIT = 2_000;
+const historyText = (value: string) =>
+  value.length <= BOT_HISTORY_TEXT_LIMIT ? value : `${value.slice(0, BOT_HISTORY_TEXT_LIMIT - 1)}…`;
+
+/** A direct-message job with the recent conversation the client already knows, oldest first. */
+export function workflowBotConversationInput(
+  nodes: ReadonlyArray<WorkflowRunNode>,
+  message: string,
+): {
+  readonly message: string;
+  readonly conversation?: ReadonlyArray<{
+    readonly role: "person" | "bot";
+    readonly text: string;
+  }>;
+} {
+  const conversation = nodes.slice(-BOT_HISTORY_RUNS).flatMap((node) => {
+    const person = historyText(workflowBotMessageText(node.run).trim());
+    const response = node.run.status === "completed" ? workflowBotResponseText(node.run) : null;
+    return [
+      ...(person === "" ? [] : [{ role: "person" as const, text: person }]),
+      ...(response === null ? [] : [{ role: "bot" as const, text: historyText(response) }]),
+    ];
+  });
+  return {
+    message,
+    ...(conversation.length === 0 ? {} : { conversation }),
+  };
+}
+
 /** Whether a run is of this workflow or invoked one, so a workflow that only runs inside others is found. */
 export function workflowRunInvolves(node: WorkflowRunNode, workflow: string): boolean {
   return (

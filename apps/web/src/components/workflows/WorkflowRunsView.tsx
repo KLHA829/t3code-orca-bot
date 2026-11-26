@@ -6,10 +6,12 @@ import { useState, type ReactNode } from "react";
 
 import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { useNowMinute } from "../../hooks/useNowMinute";
-import { cn } from "../../lib/utils";
+import { cn, randomUUID } from "../../lib/utils";
 import { useEnvironmentQuery } from "../../state/query";
+import { useAtomCommand } from "../../state/use-atom-command";
 import { serverEnvironment } from "../../state/server";
 import { Button } from "../ui/button";
+import { Input } from "../ui/input";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
 import { ScrollArea } from "../ui/scroll-area";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
@@ -32,7 +34,11 @@ import {
   workflowQuestionKinds,
   workflowRunAskingKind,
   workflowRunAsksKind,
+  workflowBotConversationInput,
+  workflowBotConversationNodes,
   workflowBotLanes,
+  workflowBotMessageText,
+  workflowBotResponseText,
   workflowRunLists,
   workflowRunNow,
   workflowTriggerLine,
@@ -305,6 +311,18 @@ export function WorkflowRunsView({
   const botDone = inBoard(everyBotDone);
   const botClosed = inBoard(everyBotClosed);
   const openBoardRun = (runId: string) => onBoardChange(null, runId);
+  const chatWorkflow = boardName !== null && boardName !== "all" ? boardName : null;
+  const conversation = chatWorkflow === null ? [] : workflowBotConversationNodes(all, chatWorkflow);
+  const botWorkflowNames = [
+    ...new Set([
+      ...snapshot.workflows
+        .map((workflow) => workflow.name)
+        .filter((name) => name.startsWith("bot-")),
+      ...all
+        .filter((node) => node.run.tags?.includes("bot") === true)
+        .map((node) => node.run.workflow),
+    ]),
+  ].sort();
   const currentRunId = listedFor(shown);
   if (boardName !== null) {
     return (
@@ -316,7 +334,11 @@ export function WorkflowRunsView({
           done={botDone}
           closed={botClosed}
           environmentId={environmentId}
+          workflow={chatWorkflow}
+          conversation={conversation}
+          bots={botWorkflowNames}
           onOpen={openBoardRun}
+          onOpenChat={(workflow) => onBoardChange(workflow)}
           onShowRuns={() => onBoardChange(null)}
         />
       </div>
@@ -546,13 +568,21 @@ function BotKanbanBoard({
   closed,
   onOpen,
   onShowRuns,
+  workflow,
+  conversation,
+  bots,
+  onOpenChat,
 }: {
   readonly environmentId: EnvironmentId;
+  readonly workflow: string | null;
+  readonly conversation: ReadonlyArray<WorkflowRunNode>;
+  readonly bots: ReadonlyArray<string>;
   readonly needsYou: ReadonlyArray<WorkflowRunNode>;
   readonly working: ReadonlyArray<WorkflowRunNode>;
   readonly done: ReadonlyArray<WorkflowRunNode>;
   readonly closed: ReadonlyArray<WorkflowRunNode>;
   readonly onOpen: (runId: string) => void;
+  readonly onOpenChat: (workflow: string) => void;
   readonly onShowRuns: () => void;
 }) {
   const gt = useGT();
@@ -577,16 +607,49 @@ function BotKanbanBoard({
             </T>
           </p>
         </div>
+        {workflow !== null || bots.length === 0 ? null : (
+          <Select
+            onValueChange={(value) => {
+              if (typeof value === "string" && value !== "") onOpenChat(value);
+            }}
+          >
+            <SelectTrigger size="sm" variant="ghost" aria-label={gt("Choose a bot to chat with")}>
+              <SelectValue>
+                <T>Chat</T>
+              </SelectValue>
+            </SelectTrigger>
+            <SelectPopup>
+              {bots.map((bot) => (
+                <SelectItem key={bot} value={bot}>
+                  <span className="flex items-center gap-2">
+                    <WorkflowChip name={bot} />
+                    {bot.replace(/^bot-/, "")}
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </Select>
+        )}
         <Button size="sm" variant="outline" onClick={onShowRuns}>
           <WorkflowIcon />
           <T>Runs</T>
         </Button>
       </div>
-      {count === 0 ? (
-        <WorkflowsEmpty
-          title={gt("No bot jobs yet")}
-          description={gt("Create a bot with `t3 bot create`, then ask it for a job.")}
+      {workflow === null ? null : (
+        <BotConversation
+          environmentId={environmentId}
+          workflow={workflow}
+          nodes={conversation}
+          onOpen={onOpen}
         />
+      )}
+      {count === 0 ? (
+        workflow === null ? (
+          <WorkflowsEmpty
+            title={gt("No bot jobs yet")}
+            description={gt("Create a bot with `t3 bot create`, then ask it for a job.")}
+          />
+        ) : null
       ) : (
         <div className="grid min-h-0 flex-1 auto-cols-[minmax(15rem,19rem)] grid-flow-col overflow-x-auto">
           {lanes.map((lane) => (
@@ -626,6 +689,112 @@ function BotKanbanBoard({
         </div>
       )}
     </div>
+  );
+}
+
+const revealChatEnd = (element: HTMLElement | null) => {
+  element?.scrollIntoView({ block: "end" });
+};
+
+/** A bot's direct-message jobs as a conversation; each sent message starts one durable run. */
+function BotConversation({
+  environmentId,
+  workflow,
+  nodes,
+  onOpen,
+}: {
+  readonly environmentId: EnvironmentId;
+  readonly workflow: string;
+  readonly nodes: ReadonlyArray<WorkflowRunNode>;
+  readonly onOpen: (runId: string) => void;
+}) {
+  const gt = useGT();
+  const m = useMessages();
+  const [draft, setDraft] = useState("");
+  const [sending, setSending] = useState(false);
+  const start = useAtomCommand(serverEnvironment.startWorkflowRun, { label: "bot chat send" });
+  const botName = workflow.replace(/^bot-/, "");
+  const send = async () => {
+    const message = draft.trim();
+    if (message === "" || sending) return;
+    setSending(true);
+    const result = await start({
+      environmentId,
+      input: {
+        workflow,
+        input: workflowBotConversationInput(nodes, message),
+        idempotencyKey: `chat/${randomUUID()}`,
+      },
+    });
+    setSending(false);
+    if (result._tag === "Success") setDraft("");
+  };
+  return (
+    <section
+      aria-label={gt("Chat with {bot}", { bot: botName })}
+      className="flex max-h-80 shrink-0 flex-col border-b"
+    >
+      <ScrollArea className="min-h-0 flex-1">
+        <div className="space-y-3 p-4">
+          {nodes.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">
+              {gt("Send a job or question. The bot answers as a durable workflow run.")}
+            </p>
+          ) : (
+            nodes.map((node) => {
+              const { run } = node;
+              const response = workflowBotResponseText(run);
+              return (
+                <div key={run.runId} className="space-y-2">
+                  <div className="ml-auto w-fit max-w-[85%] rounded-2xl bg-primary px-3 py-2 text-primary-foreground">
+                    <p className="whitespace-pre-wrap text-sm">{workflowBotMessageText(run)}</p>
+                    <p className="pt-1 text-right text-2xs text-primary-foreground/70">
+                      <RelativeLabel value={run.startedAt} />
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="block w-fit max-w-[85%] cursor-pointer rounded-2xl border bg-card px-3 py-2 text-left hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-inset focus-visible:outline-none"
+                    onClick={() => onOpen(run.runId)}
+                  >
+                    <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <WorkflowChip name={workflow} />
+                      <WorkflowStateWord node={node} />
+                    </span>
+                    <span className="block whitespace-pre-wrap pt-1 text-sm text-foreground">
+                      {response ?? workflowRunNow(node, m)}
+                    </span>
+                  </button>
+                </div>
+              );
+            })
+          )}
+          {nodes.length === 0 ? null : (
+            <div
+              key={`${nodes.length}:${nodes.at(-1)?.run.runId}:${nodes.at(-1)?.run.updatedAt}`}
+              ref={revealChatEnd}
+            />
+          )}
+        </div>
+      </ScrollArea>
+      <form
+        className="flex shrink-0 items-center gap-2 border-t p-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void send();
+        }}
+      >
+        <Input
+          aria-label={gt("Message the bot")}
+          value={draft}
+          onValueChange={setDraft}
+          placeholder={gt("Message {bot}", { bot: botName })}
+        />
+        <Button type="submit" size="sm" disabled={draft.trim() === "" || sending}>
+          {sending ? gt("Sending…") : gt("Send", { $context: "verb, sends the message" })}
+        </Button>
+      </form>
+    </section>
   );
 }
 

@@ -20,7 +20,12 @@ import {
   workflowAgentSummary,
   isOwnWorkflowAnswer,
   workflowAnswer,
+  workflowBotConversationInput,
+  workflowBotConversationNodes,
   workflowBotLanes,
+  workflowBotMessageText,
+  workflowBotResponseText,
+  type WorkflowRunNode,
   workflowWithdrawal,
   workflowChip,
   workflowFlowFocus,
@@ -288,6 +293,38 @@ describe("the list of runs", () => {
     expect(ids(lanes.working)).toEqual(["work"]);
     expect(ids(lanes.done)).toEqual(["done"]);
     expect(ids(lanes.closed)).toEqual(["closed"]);
+  });
+
+  it("collects a bot conversation oldest first and carries its recent history into the next input", () => {
+    const node = (runId: string, fields: Partial<WorkflowRun>): WorkflowRunNode => ({
+      run: run(runId, { workflow: "bot-helper", tags: ["bot", "bot:message"], ...fields }),
+      children: [],
+      questions: [],
+    });
+    const first = node("first", {
+      title: "bot-helper: What is broken?",
+      status: "completed",
+      startedAt: at(1),
+      endedAt: at(2),
+      result: { summary: "Explained the failure.", response: "The build is missing an asset." },
+    });
+    const second = node("second", {
+      title: "bot-helper: Can you fix it?",
+      startedAt: at(3),
+    });
+    const unrelated = node("unrelated", { workflow: "release", startedAt: at(0) });
+    const conversation = workflowBotConversationNodes([second, unrelated, first], "bot-helper");
+    expect(conversation.map((entry) => entry.run.runId)).toEqual(["first", "second"]);
+    expect(workflowBotMessageText(first.run)).toBe("What is broken?");
+    expect(workflowBotResponseText(first.run)).toBe("The build is missing an asset.");
+    expect(workflowBotConversationInput(conversation, "What changed?")).toEqual({
+      message: "What changed?",
+      conversation: [
+        { role: "person", text: "What is broken?" },
+        { role: "bot", text: "The build is missing an asset." },
+        { role: "person", text: "Can you fix it?" },
+      ],
+    });
   });
 
   it("counts the open questions by kind, in the order declared, with the rest as other", () => {

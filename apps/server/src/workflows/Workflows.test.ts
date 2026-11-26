@@ -3783,3 +3783,46 @@ it.effect("a bot carries its purpose and memory into its agent, then replies and
     assert.include(yield* fileSystem.readFileString(memoryFile), "Issue 42 needs a repro.");
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );
+
+it.effect("a bot names and tags a direct job before it queues", () =>
+  Effect.gen(function* () {
+    const { boot, agents } = yield* harness();
+    const helper = bot("helper", {
+      project: "project-1",
+      purpose: "Help with small jobs.",
+    });
+    yield* boot(
+      Effect.gen(function* () {
+        const workflows = yield* Workflows.Workflows;
+        const first = yield* workflows.start(
+          "helper",
+          { message: "first" },
+          { idempotencyKey: "bot-chat-first" },
+        );
+        yield* agents.started(first.runId, "respond/0");
+        const second = yield* workflows.start(
+          "helper",
+          { message: "second" },
+          { idempotencyKey: "bot-chat-second" },
+        );
+        const queued = yield* workflows.waitFor(
+          second.runId,
+          (run) => run.status === "waiting" && run.tags?.includes("bot:message") === true,
+        );
+        assert.equal(queued.title, "helper: second");
+        assert.deepStrictEqual(queued.tags, ["bot", "bot:message"]);
+
+        yield* agents.end(first.runId, "respond/0", {
+          output: { summary: "Answered first.", response: "First answer." },
+        });
+        yield* agents.started(second.runId, "respond/0");
+        yield* agents.end(second.runId, "respond/0", {
+          output: { summary: "Answered second.", response: "Second answer." },
+        });
+        yield* workflows.waitFor(first.runId, status("completed"));
+        yield* workflows.waitFor(second.runId, status("completed"));
+      }).pipe(Effect.scoped),
+      [helper],
+    );
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);

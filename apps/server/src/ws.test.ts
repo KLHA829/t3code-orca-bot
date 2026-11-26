@@ -2897,6 +2897,7 @@ it.effect("ACP session RPCs list a thread missing its history and repair it on i
 
 const workflowTags = [
   WS_METHODS.workflowsGet,
+  WS_METHODS.workflowsStart,
   WS_METHODS.workflowsAnswer,
   WS_METHODS.workflowsResume,
   WS_METHODS.workflowsCancel,
@@ -2970,6 +2971,10 @@ const makeWorkflowClient = Effect.fn("test.makeWorkflowClient")(function* (
         runId === workflowRun.runId
           ? Effect.succeed({ run: workflowRun, steps: [workflowStep], references: [] })
           : Effect.fail(new Workflows.WorkflowRunNotFoundError({ runId })),
+      start: (workflow, input, options) =>
+        Effect.sync(() => calls.push({ start: [workflow, input, options] })).pipe(
+          Effect.as({ runId: "run-1" }),
+        ),
       answer: (runId, name, value, answeredBy) =>
         Effect.sync(() => calls.push({ answer: [runId, name], value, answeredBy })),
       resume: (runId) => Effect.sync(() => calls.push({ resume: runId })),
@@ -3139,6 +3144,14 @@ it.effect("workflow RPCs read a run and pass an answer, a resume and a cancel to
       ["WorkflowRequestError", "Workflow run gone was not found."],
     );
 
+    assert.deepEqual(
+      yield* client[WS_METHODS.workflowsStart]({
+        workflow: "bot-release",
+        input: { message: "hello" },
+        idempotencyKey: "chat/1",
+      }),
+      { runId: "run-1" },
+    );
     yield* client[WS_METHODS.workflowsAnswer]({
       runId: "run-1",
       name: "approve",
@@ -3151,6 +3164,9 @@ it.effect("workflow RPCs read a run and pass an answer, a resume and a cancel to
     yield* client[WS_METHODS.workflowsCancel]({ runId: "run-1", reason: "Wrong branch" });
 
     assert.deepEqual(calls, [
+      {
+        start: ["bot-release", { message: "hello" }, { idempotencyKey: "chat/1" }],
+      },
       {
         answer: ["run-1", "approve"],
         value: { choice: "yes", reason: "Looks good" },
@@ -3175,6 +3191,11 @@ it.effect("a session that can only read sees a workflow run but cannot steer it"
 
     assert.equal((yield* client[WS_METHODS.workflowsGet]({ runId: "run-1" })).run.runId, "run-1");
     const refused = yield* Effect.all([
+      client[WS_METHODS.workflowsStart]({
+        workflow: "bot-release",
+        input: {},
+        idempotencyKey: "chat/1",
+      }).pipe(Effect.flip),
       client[WS_METHODS.workflowsAnswer]({ runId: "run-1", name: "approve", choice: "yes" }).pipe(
         Effect.flip,
       ),
@@ -3183,7 +3204,7 @@ it.effect("a session that can only read sees a workflow run but cannot steer it"
     ]);
     assert.deepEqual(
       refused.map((error) => error._tag),
-      Array.from({ length: 3 }, () => "EnvironmentAuthorizationError"),
+      Array.from({ length: 4 }, () => "EnvironmentAuthorizationError"),
     );
     assert.deepEqual(calls, []);
   }).pipe(Effect.provide(layerWorkflowRpcTest), Effect.scoped),

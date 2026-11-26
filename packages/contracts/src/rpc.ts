@@ -435,6 +435,8 @@ import {
   WorkflowRunDetail,
   WorkflowRunGetInput,
   WorkflowRunResumeInput,
+  WorkflowRunStartInput,
+  WorkflowRunStartResult,
   WorkflowCounts,
   WorkflowRunsUpdate,
   WorkflowRunsSubscribeInput,
@@ -641,6 +643,7 @@ export const WS_METHODS = {
   workflowsSubscribe: "workflows.subscribe",
   workflowsCounts: "workflows.counts",
   workflowsGet: "workflows.get",
+  workflowsStart: "workflows.start",
   workflowsAnswer: "workflows.answer",
   workflowsResume: "workflows.resume",
   workflowsCancel: "workflows.cancel",
@@ -2349,6 +2352,12 @@ const WsWorkflowsGetRpc = Rpc.make(WS_METHODS.workflowsGet, {
   error: Schema.Union([WorkflowRequestError, EnvironmentAuthorizationError]),
 });
 
+const WsWorkflowsStartRpc = Rpc.make(WS_METHODS.workflowsStart, {
+  payload: WorkflowRunStartInput,
+  success: WorkflowRunStartResult,
+  error: Schema.Union([WorkflowRequestError, EnvironmentAuthorizationError]),
+});
+
 const WsWorkflowsAnswerRpc = Rpc.make(WS_METHODS.workflowsAnswer, {
   payload: WorkflowAnswerInput,
   error: Schema.Union([WorkflowRequestError, EnvironmentAuthorizationError]),
@@ -2560,6 +2569,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsWorkflowsSubscribeRpc,
   WsWorkflowsCountsRpc,
   WsWorkflowsGetRpc,
+  WsWorkflowsStartRpc,
   WsWorkflowsAnswerRpc,
   WsWorkflowsResumeRpc,
   WsWorkflowsCancelRpc,

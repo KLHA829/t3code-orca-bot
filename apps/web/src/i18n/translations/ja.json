@@ -12746,8 +12746,13 @@
   "69b985b97ab45e6b": "スキップ済み {count} 件を表示",
   "d25661576338fcf0": "Needs you",
   "7f7f6116f1c8f3a9": "Closed",
+  "ee6b937ae30bd01a": "Choose a bot to chat with",
   "288c83473ead442c": "No bot jobs yet",
   "95cb7454721df788": "Create a bot with `t3 bot create`, then ask it for a job.",
+  "dcc55cd629efa7d4": "Chat with {bot}",
+  "a2b57048bcacbc58": "Send a job or question. The bot answers as a durable workflow run.",
+  "a95cd8b3c8f79580": "Message the bot",
+  "40e24ff9f066a463": "Message {bot}",
   "2400254d362de84d": "ワークフローの実行を読み込んでいます…",
   "cae5c3205c01d062": [
     {
@@ -12788,6 +12793,7 @@
   "5d8d278ff828102d": "すべてのワークフロー",
   "3b0f1659172107e4": "すべての種類",
   "6f7522ccd1faebaa": "Open bot jobs across this server, grouped by what needs you next. Done and closed lanes hold today’s endings.",
+  "c45458479459e3f9": "Chat",
   "55c16b90d148827c": "Runs",
   "623b864c6d3073ee": "Nothing here.",
   "39459da07479f482": "エージェント",

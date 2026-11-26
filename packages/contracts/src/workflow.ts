@@ -286,6 +286,15 @@ export const WorkflowAnswerInput = Schema.Struct({
   reason: Schema.optional(Schema.String),
 });
 
+export const WorkflowRunStartInput = Schema.Struct({
+  workflow: Schema.String,
+  input: Schema.Json,
+  /** Names this run: starting again with the same key is the same run, not a second one. */
+  idempotencyKey: Schema.String,
+});
+export const WorkflowRunStartResult = Schema.Struct({ runId: Schema.String });
+export type WorkflowRunStartResult = typeof WorkflowRunStartResult.Type;
+
 export const WorkflowRunResumeInput = Schema.Struct({ runId: Schema.String });
 
 export const WorkflowRunCancelInput = Schema.Struct({

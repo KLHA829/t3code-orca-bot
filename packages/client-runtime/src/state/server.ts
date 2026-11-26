@@ -1985,6 +1985,10 @@ export function createServerEnvironmentAtoms<R, E>(
       scheduler: configScheduler,
       concurrency: configConcurrency,
     }),
+    startWorkflowRun: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:workflows:start",
+      tag: WS_METHODS.workflowsStart,
+    }),
     answerWorkflowQuestion: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:workflows:answer",
       tag: WS_METHODS.workflowsAnswer,
