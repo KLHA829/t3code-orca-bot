@@ -28,6 +28,7 @@ import {
   workflowBotMessageText,
   workflowBotResponseText,
   workflowBotRunTitle,
+  workflowBotVisibleConversationNodes,
   type WorkflowRunNode,
   workflowWithdrawal,
   workflowChip,
@@ -330,6 +331,26 @@ describe("the list of runs", () => {
         { role: "person", text: "Can you fix it?" },
       ],
     });
+  });
+
+  it("keeps only the latest bot jobs visible in a chat", () => {
+    const nodeAt = (index: number): WorkflowRunNode => ({
+      run: run(`message-${index}`, {
+        workflow: "bot-helper",
+        title: `bot-helper: message ${index}`,
+        tags: ["bot", "bot:message"],
+        startedAt: at(index),
+      }),
+      children: [],
+      questions: [],
+    });
+    const visible = workflowBotVisibleConversationNodes(
+      Array.from({ length: 55 }, (_, index) => nodeAt(index)),
+      "bot-helper",
+    );
+    expect(visible).toHaveLength(50);
+    expect(visible[0]?.run.runId).toBe("message-5");
+    expect(visible.at(-1)?.run.runId).toBe("message-54");
   });
 
   it("uses bot-friendly wording for cards and chat statuses", () => {

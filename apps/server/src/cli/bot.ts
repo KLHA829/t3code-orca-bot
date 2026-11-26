@@ -1,4 +1,8 @@
+// @effect-diagnostics nodeBuiltinImport:off - bot file slugs use a synchronous stable hash.
+import * as NodeCrypto from "node:crypto";
+
 import * as Clock from "effect/Clock";
+import * as Duration from "effect/Duration";
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -7,7 +11,11 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import { Argument, Command, Flag } from "effect/cli";
 
+import { isExplicitRelativePath } from "@t3tools/shared/path";
+
 import { resolveBaseDir } from "../os-jank.ts";
+import { parseTimeOfDay } from "../scheduledTasks/Schedule.ts";
+import { isProjectPath } from "../workflows/WorkflowAgents.ts";
 import { WorkflowRun, WorkflowStep } from "../workflows/WorkflowStore.ts";
 import { projectLocationFlags } from "./config.ts";
 import {
@@ -18,16 +26,35 @@ import {
   withThreadTools,
 } from "./thread.ts";
 
-/** The file-safe slug of a bot's display name, or undefined when it has no letters or digits. */
+/** The slug of a bot's display name, or undefined when it has no letters or digits. */
 export const botSlug = (name: string) => {
-  const slug = name
+  const separated = name
     .trim()
+    .normalize("NFC")
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 48)
-    .replace(/-+$/g, "");
+    .replace(/[^\p{L}\p{N}]+/gu, "-")
+    .replace(/^-+|-+$/g, "");
+  const slug = Array.from(separated).slice(0, 48).join("").replace(/-+$/g, "");
   return slug === "" ? undefined : slug;
+};
+
+/**
+ * The ASCII file name for a bot slug. Workflow definition files stay ASCII for portability;
+ * a non-ASCII slug keeps a hash of the whole slug so distinct bot names do not collapse together.
+ */
+export const botFileSlug = (slug: string) => {
+  const separated = slug
+    .normalize("NFKD")
+    .replace(/\p{M}+/gu, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  if (!/[^\x00-\x7f]/.test(slug)) return separated;
+  const hash = NodeCrypto.createHash("sha256").update(slug, "utf8").digest("hex").slice(0, 12);
+  const base = Array.from(separated === "" ? "unicode" : separated)
+    .slice(0, 35)
+    .join("")
+    .replace(/-+$/g, "");
+  return `${base === "" ? "unicode" : base}-${hash}`;
 };
 
 /** The workflow file a created bot runs from. Workflow files import nothing from T3 itself. */
@@ -149,6 +176,32 @@ const createCommand = Command.make("create", {
           detail: "Pass --provider-instance and --model together, or neither.",
         });
       }
+      if (
+        (isExplicitRelativePath(flags.project) ||
+          flags.project.includes("/") ||
+          flags.project.includes("\\")) &&
+        !isProjectPath(flags.project)
+      ) {
+        return yield* new ThreadUsageError({
+          detail: "The project must be a project id or an absolute folder, not a relative path.",
+        });
+      }
+      if (Option.isSome(flags.every)) {
+        const everyMs = Option.map(
+          Duration.fromInput(flags.every.value as Duration.Input),
+          Duration.toMillis,
+        );
+        if (Option.isNone(everyMs) || everyMs.value < 60_000) {
+          return yield* new ThreadUsageError({
+            detail: 'Pass --every as a duration of at least one minute, such as "1 hour".',
+          });
+        }
+      }
+      if (Option.isSome(flags.daily) && parseTimeOfDay(flags.daily.value) === null) {
+        return yield* new ThreadUsageError({
+          detail: 'Pass --daily as a 24-hour time such as "09:00".',
+        });
+      }
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const baseDir = yield* resolveBaseDir(Option.getOrUndefined(flags.baseDir));
@@ -156,7 +209,7 @@ const createCommand = Command.make("create", {
       const workflowsDir = path.join(baseDir, "workflows");
       const soulFile = path.join(botDir, "SOUL.md");
       const memoryFile = path.join(botDir, "MEMORY.md");
-      const workflowFile = path.join(workflowsDir, `bot-${slug}.ts`);
+      const workflowFile = path.join(workflowsDir, `bot-${botFileSlug(slug)}.ts`);
       const exists = yield* Effect.forEach(
         [soulFile, workflowFile],
         (file) => fs.exists(file).pipe(Effect.orElseSucceed(() => false)),

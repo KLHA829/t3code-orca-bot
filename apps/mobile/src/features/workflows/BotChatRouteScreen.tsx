@@ -3,7 +3,7 @@ import {
   groupWorkflowRuns,
   workflowBotChatStatusText,
   workflowBotConversationInput,
-  workflowBotConversationNodes,
+  workflowBotVisibleConversationNodes,
   workflowBotMessageText,
   workflowBotResponseText,
   workflowRunState,
@@ -129,7 +129,9 @@ export function BotChatRouteScreen({ route }: StaticScreenProps<BotChatParams>) 
       : groupWorkflowRuns(snapshot.workflows, snapshot.runs, snapshot.questions);
   const asking = new Set((snapshot?.questions ?? []).map((question) => question.runId));
   const turns =
-    groups === null ? [] : workflowBotConversationNodes(allWorkflowRunNodes(groups), workflow);
+    groups === null
+      ? []
+      : workflowBotVisibleConversationNodes(allWorkflowRunNodes(groups), workflow);
   const send = async () => {
     const message = draft.trim();
     if (message === "" || sending) return;

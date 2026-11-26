@@ -403,6 +403,17 @@ export function workflowBotConversationNodes(
     .sort((left, right) => left.run.startedAt.localeCompare(right.run.startedAt));
 }
 
+/** How much of a bot conversation a chat renders. Older jobs remain in Activity. */
+const BOT_CHAT_VISIBLE_RUNS = 50;
+
+/** The latest direct-message runs a bot chat renders, oldest first. */
+export function workflowBotVisibleConversationNodes(
+  nodes: ReadonlyArray<WorkflowRunNode>,
+  workflow: string,
+): ReadonlyArray<WorkflowRunNode> {
+  return workflowBotConversationNodes(nodes, workflow).slice(-BOT_CHAT_VISIBLE_RUNS);
+}
+
 const BOT_HISTORY_RUNS = 8;
 const BOT_HISTORY_TEXT_LIMIT = 2_000;
 const historyText = (value: string) =>

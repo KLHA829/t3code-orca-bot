@@ -18,7 +18,7 @@ import {
   makePersistedServerRuntimeState,
   persistServerRuntimeState,
 } from "../serverRuntimeState.ts";
-import { botCommand, botSlug, botWorkflowSource } from "./bot.ts";
+import { botCommand, botFileSlug, botSlug, botWorkflowSource } from "./bot.ts";
 
 vi.mock("../auth/EnvironmentAuth.ts", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../auth/EnvironmentAuth.ts")>();
@@ -108,6 +108,11 @@ it.effect("bot slugs are file-safe and bounded", () =>
     assert.equal(botSlug("Bug Triage Bot"), "bug-triage-bot");
     assert.equal(botSlug("  issue+pr/helper  "), "issue-pr-helper");
     assert.equal(botSlug("---"), undefined);
+    assert.equal(botSlug("助手"), "助手");
+    assert.match(botFileSlug(botSlug("助手") ?? ""), /^unicode-[0-9a-f]{12}$/);
+    assert.match(botFileSlug("助手-bot"), /^bot-[0-9a-f]{12}$/);
+    assert.notEqual(botFileSlug("助手"), botFileSlug("幫手"));
+    assert.equal(botSlug("Triage 🤖"), "triage");
     assert.equal(botSlug(`${"a".repeat(60)}-tail`), "a".repeat(48));
   }),
 );
@@ -139,6 +144,43 @@ it.effect("a generated bot workflow declares its memory, project, and triggers",
     assert.include(source, 'T3.webhook("jobs")');
     assert.notInclude(source, "T3.pullRequests.opened");
   }),
+);
+
+it.effect("bot create rejects invalid project and schedule input before writing files", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-bots-invalid-" });
+    const create = (extra: ReadonlyArray<string>) => [
+      "create",
+      "Bug Bot",
+      "--project",
+      "/repo",
+      "--purpose",
+      "Triage bugs.",
+      "--base-dir",
+      baseDir,
+      ...extra,
+    ];
+
+    const relative = yield* runBotCli(
+      create([]).map((part) => (part === "/repo" ? "apps/repo" : part)),
+    );
+    assert.equal(relative?._tag, "ThreadUsageError");
+    assert.include(relative?.message ?? "", "relative path");
+
+    const every = yield* runBotCli(create(["--every", "nonsense"]));
+    assert.equal(every?._tag, "ThreadUsageError");
+    assert.include(every?.message ?? "", "--every");
+
+    const daily = yield* runBotCli(create(["--daily", "25:00"]));
+    assert.equal(daily?._tag, "ThreadUsageError");
+    assert.include(daily?.message ?? "", "--daily");
+    assert.isFalse(yield* fs.exists(path.join(baseDir, "bots", "bug-bot")));
+  }).pipe(
+    Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, NetService.layer)),
+    Effect.scoped,
+  ),
 );
 
 it.effect("bot create writes soul, memory, and workflow files without replacing memory", () =>
@@ -179,6 +221,24 @@ it.effect("bot create writes soul, memory, and workflow files without replacing 
     yield* fs.writeFileString(memoryFile, "# Bug Bot memory\n\nKeep me.");
     assert.equal(yield* runBotCli([...args, "--force"]), undefined);
     assert.include(yield* fs.readFileString(memoryFile), "Keep me.");
+
+    assert.equal(
+      yield* runBotCli([
+        "create",
+        "助手",
+        "--project",
+        "/repo",
+        "--purpose",
+        "幫手做小事。",
+        "--base-dir",
+        baseDir,
+      ]),
+      undefined,
+    );
+    assert.isTrue(yield* fs.exists(path.join(baseDir, "bots", "助手", "SOUL.md")));
+    const unicodeWorkflowFile = path.join(baseDir, "workflows", `bot-${botFileSlug("助手")}.ts`);
+    assert.isTrue(yield* fs.exists(unicodeWorkflowFile));
+    assert.include(yield* fs.readFileString(unicodeWorkflowFile), 'T3.bot("bot-助手"');
 
     assert.equal(yield* runBotCli(["list", "--base-dir", baseDir]), undefined);
   }).pipe(

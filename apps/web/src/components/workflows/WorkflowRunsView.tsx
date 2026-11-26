@@ -57,7 +57,7 @@ import {
   workflowBotActivityText,
   workflowBotChatStatusText,
   workflowBotConversationInput,
-  workflowBotConversationNodes,
+  workflowBotVisibleConversationNodes,
   workflowBotLanes,
   workflowBotMessageText,
   workflowBotResponseText,
@@ -335,7 +335,8 @@ export function WorkflowRunsView({
   const botClosed = inBoard(everyBotClosed);
   const openBoardRun = (runId: string) => onBoardChange(null, runId);
   const chatWorkflow = boardName !== null && boardName !== "all" ? boardName : null;
-  const conversation = chatWorkflow === null ? [] : workflowBotConversationNodes(all, chatWorkflow);
+  const conversation =
+    chatWorkflow === null ? [] : workflowBotVisibleConversationNodes(all, chatWorkflow);
   const botWorkflowNames = [
     ...new Set([
       ...snapshot.workflows
@@ -771,8 +772,13 @@ function BotConversation({
     return usable && provider.models.length > 0 ? [{ provider, models: provider.models }] : [];
   });
   const selectedModelLabel = modelGroups
-    .flatMap(({ models }) => models)
-    .find((model) => model.slug === modelOverride?.model)?.name;
+    .flatMap(({ provider, models }) =>
+      models.map((model) => ({ instanceId: provider.instanceId, model })),
+    )
+    .find(
+      ({ instanceId, model }) =>
+        instanceId === modelOverride?.instanceId && model.slug === modelOverride?.model,
+    )?.model.name;
   const botName = workflow.replace(/^bot-/, "");
   const send = async () => {
     const message = draft.trim();

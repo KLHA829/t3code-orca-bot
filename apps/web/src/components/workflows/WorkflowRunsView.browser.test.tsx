@@ -60,6 +60,7 @@ const state = vi.hoisted(() => ({
   steps: {} as Record<string, ReadonlyArray<unknown>>,
   references: {} as Record<string, ReadonlyArray<unknown>>,
   commands: [] as Array<readonly [label: string | undefined, input: unknown]>,
+  providers: [] as ReadonlyArray<unknown>,
   permitted: true,
   detailError: null as string | null,
   linked: [] as ReadonlyArray<string>,
@@ -77,6 +78,7 @@ function setup(
   state.steps = steps;
   state.references = references;
   state.commands = [];
+  state.providers = [botProvider];
   state.permitted = true;
   state.detailError = null;
   state.linked = [];
@@ -165,7 +167,7 @@ vi.mock(import("../../state/environments"), async (original) => ({
   ...(await original()),
   useEnvironment: ((id: EnvironmentId | null) =>
     id === environmentId ? environment : null) as never,
-  useEnvironmentProviders: (() => new Map([[environmentId, [botProvider]]])) as never,
+  useEnvironmentProviders: (() => new Map([[environmentId, state.providers]])) as never,
 }));
 // The chat's renderer loads its highlighter; a question's body only has to reach the page.
 vi.mock("../ChatMarkdown", () => ({
@@ -435,6 +437,32 @@ describe("WorkflowRunsView", () => {
       },
     });
     expect((input as { readonly idempotencyKey: string }).idempotencyKey).toMatch(/^chat\//);
+  });
+
+  it("labels a bot model by its provider instance when model slugs overlap", async () => {
+    setup({
+      workflows: [{ name: "bot-triage", version: 1, triggers: [] }],
+      runs: [],
+      questions: [],
+    });
+    state.providers = [
+      botProvider,
+      {
+        ...botProvider,
+        instanceId: "other",
+        displayName: "Other",
+        models: [{ slug: "gpt-5", name: "Other GPT-5", isCustom: false, capabilities: null }],
+      },
+    ];
+    await using _desktop = await desktop();
+    await using screen = await render(page(null, {}, null, "bot-triage"));
+
+    await screen.getByRole("combobox", { name: "Choose the bot model" }).click();
+    await screen.getByRole("option", { name: "Other GPT-5" }).click();
+
+    await expect
+      .element(screen.getByRole("combobox", { name: "Choose the bot model" }))
+      .toMatchTextContent(/Model\s*Other GPT-5/);
   });
 
   it("opens a bot conversation from the shared board", async () => {
