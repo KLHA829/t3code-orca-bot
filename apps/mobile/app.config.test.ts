@@ -6,7 +6,11 @@ import assetLinks from "../web/public/.well-known/assetlinks.json";
 
 // Keep config parsing independent of local env files and build credentials.
 vi.mock("../../scripts/lib/public-config.ts", () => ({
-  loadRepoEnv: () => ({ APP_VARIANT: process.env.APP_VARIANT }),
+  loadRepoEnv: () => ({
+    APP_VARIANT: process.env.APP_VARIANT,
+    T3CODE_IOS_PERSONAL_TEAM: process.env.T3CODE_IOS_PERSONAL_TEAM,
+    T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID: process.env.T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID,
+  }),
 }));
 
 afterEach(() => {
@@ -44,4 +48,14 @@ it.each([
     { scheme: "https", host, pathPrefix: "/threads/" },
   ]);
   expect(assetLinks.map((link) => link.target.package_name)).toContain(identifier);
+});
+
+it("uses the personal-team bundle identifier in keychain access groups", async () => {
+  vi.stubEnv("T3CODE_IOS_PERSONAL_TEAM", "1");
+  vi.stubEnv("T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID", "com.example.t3code");
+  const config = await loadConfig("production");
+  expect(config.ios?.bundleIdentifier).toBe("com.example.t3code");
+  expect(config.ios?.entitlements?.["keychain-access-groups"]).toEqual([
+    "$(AppIdentifierPrefix)com.example.t3code",
+  ]);
 });

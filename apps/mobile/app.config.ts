@@ -264,7 +264,7 @@ const config: ExpoConfig = {
       `applinks:${HOSTED_APP_HOST}`,
     ],
     entitlements: {
-      "keychain-access-groups": [`$(AppIdentifierPrefix)${variant.iosBundleIdentifier}`],
+      "keychain-access-groups": [`$(AppIdentifierPrefix)${iosBundleIdentifier}`],
     },
     infoPlist: {
       UISupportedInterfaceOrientations: [
@@ -327,6 +327,7 @@ const config: ExpoConfig = {
     favicon: variant.assets.appIcon,
   },
   plugins: [
+    ...(isIosPersonalTeamBuild ? ["./plugins/withoutIosPersonalTeamCapabilities.cjs"] : []),
     "expo-asset",
     [
       "expo-font",
@@ -370,7 +371,7 @@ const config: ExpoConfig = {
         mode: APP_VARIANT === "development" ? "development" : "production",
       },
     ],
-    // Gate Clerk here: withoutIosPersonalTeamCapabilities runs too early to strip its entitlement.
+    // Gate Clerk here too: its native Sign in with Apple entitlement is unavailable to Personal Teams.
     ["@clerk/expo", { theme: "./clerk-theme.json", appleSignIn: !isIosPersonalTeamBuild }],
     "expo-web-browser",
     [
@@ -467,7 +468,6 @@ const config: ExpoConfig = {
     // MainActivity mods run in reverse order; extend the tablet-orientation override.
     "./plugins/withAndroidWindowDisplayMetrics.cjs",
     "./plugins/withAndroidTabletOrientation.cjs",
-    ...(isIosPersonalTeamBuild ? ["./plugins/withoutIosPersonalTeamCapabilities.cjs"] : []),
   ],
   extra: {
     appVariant: APP_VARIANT,

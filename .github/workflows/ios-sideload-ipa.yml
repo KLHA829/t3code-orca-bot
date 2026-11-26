@@ -1,0 +1,104 @@
+name: iOS sideload IPA
+
+# Builds an unsigned physical-device IPA that can be signed locally with
+# Sideloadly or AltStore. It intentionally uses no Apple credentials.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Unsigned iPhone IPA
+    runs-on: macos-latest
+    timeout-minutes: 90
+    env:
+      APP_VARIANT: production
+      T3CODE_IOS_PERSONAL_TEAM: "1"
+      T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID: com.klha829.t3code
+      EXPO_NO_GIT_STATUS: "1"
+      NODE_OPTIONS: --max-old-space-size=8192
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+
+      - name: Setup dependencies
+        uses: ./.github/actions/setup-ci-deps
+        with:
+          install-args: --filter=@t3tools/mobile... --filter=@t3tools/scripts...
+
+      - name: Select the newest installed Xcode
+        run: |
+          xcode="$(find /Applications -maxdepth 1 -type d -name 'Xcode*.app' | sort -V | tail -1)"
+          test -n "$xcode"
+          sudo xcode-select -s "$xcode/Contents/Developer"
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          pod --version
+
+      - name: Generate iOS project
+        working-directory: apps/mobile
+        run: vp exec expo prebuild --clean --platform ios --no-install
+
+      - name: Install CocoaPods
+        working-directory: apps/mobile/ios
+        run: pod install
+
+      - name: Inspect Xcode workspace
+        working-directory: apps/mobile
+        run: xcodebuild -list -workspace ios/T3Code.xcworkspace
+
+      - name: Build unsigned Release app
+        working-directory: apps/mobile
+        run: |
+          xcodebuild \
+            -workspace ios/T3Code.xcworkspace \
+            -scheme T3Code \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY='' \
+            EXPANDED_CODE_SIGN_IDENTITY='' \
+            DEVELOPMENT_TEAM='' \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=NO \
+            build
+
+      - name: Package unsigned IPA
+        working-directory: apps/mobile
+        run: |
+          app_dir="$RUNNER_TEMP/DerivedData/Build/Products/Release-iphoneos"
+          app="$(find "$app_dir" -maxdepth 1 -name '*.app' -print -quit)"
+          test -n "$app"
+          rm -rf "$RUNNER_TEMP/payload"
+          mkdir -p "$RUNNER_TEMP/payload/Payload" "$GITHUB_WORKSPACE/artifacts"
+          ditto "$app" "$RUNNER_TEMP/payload/Payload/T3Code.app"
+          (cd "$RUNNER_TEMP/payload" && zip -qry "$GITHUB_WORKSPACE/artifacts/T3CodeOrcaBot-unsigned.ipa" Payload)
+          {
+            echo "bundleIdentifier=$T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID"
+            echo "app=$(basename "$app")"
+            echo "ipaBytes=$(stat -f %z "$GITHUB_WORKSPACE/artifacts/T3CodeOrcaBot-unsigned.ipa")"
+            echo "macOS=$(sw_vers -productVersion)"
+            echo "xcode=$(xcodebuild -version | tr '\n' ' ')"
+            if codesign -dv "$RUNNER_TEMP/payload/Payload/T3Code.app" >/dev/null 2>&1; then
+              echo "signed=yes"
+            else
+              echo "signed=no"
+            fi
+            echo "personalTeamReducedCapabilities=yes"
+            echo "notes=Unsigned physical-device Release build. Widget, share extension, push, and native Sign in with Apple are omitted by Personal Team mode."
+          } > "$GITHUB_WORKSPACE/artifacts/build-report.txt"
+          cat "$GITHUB_WORKSPACE/artifacts/build-report.txt"
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: t3code-orca-bot-ios-unsigned
+          path: artifacts/
+          if-no-files-found: error
