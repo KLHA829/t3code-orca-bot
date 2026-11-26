@@ -17,7 +17,7 @@ export function Chip(props: {
   readonly selected?: boolean;
   readonly icon?: AppSymbolName;
   readonly trailingIcon?: AppSymbolName;
-  readonly size?: "small" | "default";
+  readonly size?: "small" | "default" | "large";
   readonly glass?: boolean;
   readonly colorScheme?: "light" | "dark";
   readonly onPress?: () => void;
@@ -25,9 +25,10 @@ export function Chip(props: {
   readonly disabled?: boolean;
 }) {
   const small = props.size === "small";
+  const large = props.size === "large";
   const layout = cn(
     "flex-row items-center gap-1.5 rounded-2xl px-3",
-    small ? "py-1" : "min-h-8 py-1.5",
+    small ? "py-1" : large ? "min-h-[44px] py-2 android:min-h-[48px]" : "min-h-8 py-1.5",
   );
   const iconColor = props.selected ? "accent-primary-foreground" : "accent-icon-muted";
   const content = (

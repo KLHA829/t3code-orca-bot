@@ -125,13 +125,15 @@ function EnvironmentBotRuns(props: {
   readonly workflows: WorkflowRunsSnapshot["workflows"];
   readonly lists: Readonly<Record<WorkflowListTab, ReadonlyArray<WorkflowRunNode>>>;
   readonly openRun: (node: WorkflowRunNode) => () => void;
+  readonly bot: string | null;
+  readonly onBotChange: (bot: string | null) => void;
 }) {
   const gt = useGT();
   const nowMinuteMs = useNowMinuteMs();
-  const [bot, setBot] = useState<string | null>(null);
   const botNames = props.workflows
     .map((workflow) => workflow.name)
     .filter((name) => name.startsWith("bot-"));
+  const bot = props.bot !== null && botNames.includes(props.bot) ? props.bot : null;
   const unfiltered = workflowBotLanes(props.lists, nowMinuteMs);
   const inBot = (nodes: ReadonlyArray<WorkflowRunNode>) =>
     bot === null ? nodes : nodes.filter((node) => node.run.workflow === bot);
@@ -156,13 +158,19 @@ function EnvironmentBotRuns(props: {
           showsHorizontalScrollIndicator={false}
           contentContainerClassName="gap-2 px-5 pt-2"
         >
-          <Chip label={gt("All bots")} selected={bot === null} onPress={() => setBot(null)} />
+          <Chip
+            label={gt("All bots")}
+            selected={bot === null}
+            size="large"
+            onPress={() => props.onBotChange(null)}
+          />
           {botNames.map((name) => (
             <Chip
               key={name}
               label={name.replace(/^bot-/, "")}
               selected={bot === name}
-              onPress={() => setBot(name)}
+              size="large"
+              onPress={() => props.onBotChange(name)}
             />
           ))}
         </ScrollView>
@@ -173,7 +181,9 @@ function EnvironmentBotRuns(props: {
             {gt("No bot jobs yet.")}
           </Text>
           <Text className="pt-1 text-center text-xs text-foreground-muted">
-            {gt("Create a bot with `t3 bot create`, then ask it for a job.")}
+            {bot === null
+              ? gt("Create a bot with `t3 bot create`, then ask it for a job.")
+              : gt("This bot has no jobs yet.")}
           </Text>
         </View>
       ) : (
@@ -209,6 +219,8 @@ function EnvironmentRuns(props: {
   readonly tab: MobileWorkflowListTab;
   /** The kind of question to narrow Needs you to; null for every run in it. */
   readonly kind: string | null;
+  readonly bot: string | null;
+  readonly onBotChange: (bot: string | null) => void;
 }) {
   const navigation = useNavigation();
   const gt = useGT();
@@ -236,6 +248,8 @@ function EnvironmentRuns(props: {
         workflows={snapshot.workflows}
         lists={lists}
         openRun={openRun}
+        bot={props.bot}
+        onBotChange={props.onBotChange}
       />
     );
   }
@@ -291,6 +305,7 @@ const needsYouSources = (snapshots: ReadonlyArray<WorkflowRunsSnapshot>) =>
 export function WorkflowsScreen() {
   const { environments, isReady } = useEnvironments();
   const [tab, setTab] = useState<MobileWorkflowListTab | null>(null);
+  const [botFilters, setBotFilters] = useState<Readonly<Record<string, string | null>>>({});
   const insets = useSafeAreaInsets();
   const gt = useGT();
   const m = useMessages();
@@ -396,6 +411,7 @@ export function WorkflowsScreen() {
               <Chip
                 label={gt("All kinds", { $context: "filter, every kind of workflow question" })}
                 selected={kind === null}
+                size="large"
                 onPress={() => pickKind(undefined)}
               />
               {kinds.map((candidate) => (
@@ -406,6 +422,7 @@ export function WorkflowsScreen() {
                     gt("Other", { $context: "workflow questions that have no kind" })
                   } ${candidate.count}`}
                   selected={kind === candidate.kind}
+                  size="large"
                   onPress={() => pickKind(candidate.kind)}
                 />
               ))}
@@ -419,6 +436,13 @@ export function WorkflowsScreen() {
               snapshot={snapshot}
               tab={shown}
               kind={kind}
+              bot={botFilters[environment.environmentId] ?? null}
+              onBotChange={(bot) =>
+                setBotFilters((current) => ({
+                  ...current,
+                  [environment.environmentId]: bot,
+                }))
+              }
             />
           ))}
         </>
