@@ -139,7 +139,10 @@ import { SettingsProjectGroupingRouteScreen } from "./features/settings/Settings
 import { SettingsProjectOverviewRouteScreen } from "./features/settings/SettingsProjectOverviewRouteScreen";
 import { UsageLimitAccountScreen } from "./features/usage/UsageLimitsPooled";
 import { UsageRouteScreen } from "./features/usage/UsageRouteScreen";
-import { BotChatRouteScreen } from "./features/workflows/BotChatRouteScreen";
+import {
+  BotChatModelPickerRouteScreen,
+  BotChatRouteScreen,
+} from "./features/workflows/BotChatRouteScreen";
 import { WorkflowRunRouteScreen } from "./features/workflows/WorkflowRunRouteScreen";
 import { WorkflowStepSheet } from "./features/workflows/WorkflowStepSheet";
 import { SettingsAboutRouteScreen } from "./features/settings/SettingsAboutRouteScreen";
@@ -792,6 +795,10 @@ const RootStackConfig = createWorkspaceStackNavigator({
       screen: BotChatRouteScreen,
       linking: { path: "bots/:environmentId/:workflow" },
       options: pageRoute({ duoMinimize: "onScrollUp" }),
+    }),
+    BotChatModel: createNativeStackScreen({
+      screen: BotChatModelPickerRouteScreen,
+      options: pageRoute({ header: "solid" }),
     }),
     WorkflowRun: createNativeStackScreen({
       screen: WorkflowRunRouteScreen,

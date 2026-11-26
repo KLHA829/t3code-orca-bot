@@ -5,9 +5,13 @@ import * as NodePath from "node:path";
 import * as DateTime from "effect/DateTime";
 import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
+import { ModelSelection, ProviderInstanceId } from "@t3tools/contracts";
+
 import { issues, pullRequests } from "./forgeApi.ts";
+import { store } from "./stepServices.ts";
 import { checkOptions } from "./options.ts";
 import {
   type OpenedTrigger,
@@ -47,6 +51,25 @@ interface BotEvent {
   readonly origin: string;
   readonly message?: string | undefined;
 }
+
+const decodeModelSelection = Schema.decodeUnknownSync(ModelSelection);
+
+const directModelOf = (payload: Schema.Json): ModelSelection | null | undefined => {
+  if (
+    typeof payload !== "object" ||
+    payload === null ||
+    Array.isArray(payload) ||
+    !("model" in payload)
+  ) {
+    return undefined;
+  }
+  if (payload.model === null) return null;
+  try {
+    return decodeModelSelection(payload.model);
+  } catch {
+    return undefined;
+  }
+};
 
 const eventOf = (payload: Schema.Json): BotEvent => {
   if (isIssue(payload)) {
@@ -117,6 +140,7 @@ const readOptionalFile = async (file: string) => {
 const BotContext = Schema.Struct({
   purpose: Schema.String,
   memory: Schema.String,
+  model: Schema.optional(ModelSelection),
 });
 
 class BotContextReadError extends Schema.TaggedError<BotContextReadError>()("BotContextReadError", {
@@ -232,6 +256,8 @@ export const bot = (
     }
   }
 
+  const modelStore = store.entry(`bot:${name}:model`, ModelSelection);
+
   return workflow(
     name,
     {
@@ -241,6 +267,7 @@ export const bot = (
     },
     Effect.fn(function* (payload) {
       const event = eventOf(payload);
+      const directModel = directModelOf(payload);
       yield* title(`${name}: ${event.label}`);
       yield* tags(["bot", `bot:${event.kind}`]);
       // Tag and name direct jobs before they queue, so a chat message stays visible while the bot is busy.
@@ -248,20 +275,40 @@ export const bot = (
         const context = yield* step(
           "context",
           { returns: BotContext },
-          Effect.tryPromise({
-            try: async () => ({
-              purpose: [
-                options.purpose ?? "",
-                options.purposeFile === undefined
-                  ? ""
-                  : await readOptionalFile(options.purposeFile),
-              ]
-                .filter((part) => part.trim().length > 0)
-                .join("\n\n"),
-              memory:
-                options.memoryFile === undefined ? "" : await readOptionalFile(options.memoryFile),
-            }),
-            catch: (cause) => new BotContextReadError({ cause }),
+          Effect.gen(function* () {
+            const files = yield* Effect.tryPromise({
+              try: async () => ({
+                purpose: [
+                  options.purpose ?? "",
+                  options.purposeFile === undefined
+                    ? ""
+                    : await readOptionalFile(options.purposeFile),
+                ]
+                  .filter((part) => part.trim().length > 0)
+                  .join("\n\n"),
+                memory:
+                  options.memoryFile === undefined
+                    ? ""
+                    : await readOptionalFile(options.memoryFile),
+              }),
+              catch: (cause) => new BotContextReadError({ cause }),
+            });
+            const storedModel = yield* modelStore.update((current) =>
+              directModel === null ? undefined : (directModel ?? Option.getOrUndefined(current)),
+            );
+            const model = directModel ?? Option.getOrUndefined(storedModel) ?? options.agent?.model;
+            return {
+              ...files,
+              ...(model === undefined
+                ? {}
+                : {
+                    model: {
+                      instanceId: ProviderInstanceId.make(model.instanceId),
+                      model: model.model,
+                      ...(model.options === undefined ? {} : { options: model.options }),
+                    },
+                  }),
+            };
           }),
         );
         const result = yield* agent("respond", {
@@ -275,7 +322,7 @@ export const bot = (
           }),
           returns: BotAgentResult,
           ...(isIssue(payload) ? { issue: payload } : {}),
-          ...(options.agent?.model === undefined ? {} : { model: options.agent.model }),
+          ...(context.model === undefined ? {} : { model: context.model }),
           ...(options.agent?.environment === undefined
             ? {}
             : { environment: options.agent.environment }),
@@ -322,6 +369,9 @@ export const bot = (
           response: result.value.response,
           event: event.kind,
           ...(event.message === undefined ? {} : { message: event.message }),
+          ...(event.kind === "message" && context.model !== undefined
+            ? { model: context.model }
+            : {}),
           thread: result.thread,
         };
       });

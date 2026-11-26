@@ -2,6 +2,7 @@ import { mFallback, msg } from "gt-i18n";
 import type { MFunctionType } from "gt-i18n/types";
 import {
   type IssueRef,
+  type ModelSelection,
   type PullRequestRef,
   WorkflowIssueAddress,
   WorkflowPullRequestAddress,
@@ -370,8 +371,10 @@ const historyText = (value: string) =>
 export function workflowBotConversationInput(
   nodes: ReadonlyArray<WorkflowRunNode>,
   message: string,
+  model?: ModelSelection | null,
 ): {
   readonly message: string;
+  readonly model?: ModelSelection | null;
   readonly conversation?: ReadonlyArray<{
     readonly role: "person" | "bot";
     readonly text: string;
@@ -387,6 +390,7 @@ export function workflowBotConversationInput(
   });
   return {
     message,
+    ...(model === undefined ? {} : { model }),
     ...(conversation.length === 0 ? {} : { conversation }),
   };
 }

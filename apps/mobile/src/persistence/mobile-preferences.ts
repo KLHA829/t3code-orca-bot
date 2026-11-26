@@ -16,6 +16,7 @@ import {
   PullRequestListState,
   type ProviderInstanceId,
   PullRequestMergeMethod,
+  ModelSelection,
   type SidebarProjectGroupingMode,
 } from "@t3tools/contracts";
 import { ToolCallVisibility } from "@t3tools/contracts/settings";
@@ -132,6 +133,7 @@ const ThreadProject = Schema.Struct({
   projectId: Schema.NonEmptyString,
 });
 const isThreadProject = Schema.is(ThreadProject);
+const isModelSelection = Schema.is(ModelSelection);
 
 export interface Preferences {
   readonly navigationTabOrder?: readonly string[];
@@ -175,6 +177,8 @@ export interface Preferences {
   readonly workingShelfEnabled?: boolean;
   /** The kind of question the Workflows tab's Needs you list was last narrowed to. */
   readonly workflowQuestionKind?: string;
+  /** The chat model chosen for one bot, keyed by environment and workflow. */
+  readonly botModelSelections?: Readonly<Record<string, ModelSelection>>;
   readonly useLastProjectForNewThreads?: boolean;
   readonly lastThreadProject?: typeof ThreadProject.Type;
   readonly modelFavorites?: ReadonlyArray<{
@@ -268,6 +272,7 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     toolCallVisibility?: ToolCallVisibility;
     workingShelfEnabled?: boolean;
     workflowQuestionKind?: string;
+    botModelSelections?: Readonly<Record<string, ModelSelection>>;
     useLastProjectForNewThreads?: boolean;
     lastThreadProject?: typeof ThreadProject.Type;
     modelFavorites?: Preferences["modelFavorites"];
@@ -418,6 +423,18 @@ function sanitizePreferences(parsed: Preferences): Preferences {
   }
   if (typeof parsed.workflowQuestionKind === "string") {
     preferences.workflowQuestionKind = parsed.workflowQuestionKind;
+  }
+
+  if (
+    parsed.botModelSelections !== null &&
+    typeof parsed.botModelSelections === "object" &&
+    !Array.isArray(parsed.botModelSelections)
+  ) {
+    const selections: Record<string, ModelSelection> = {};
+    for (const [key, selection] of Object.entries(parsed.botModelSelections)) {
+      if (key !== "" && isModelSelection(selection)) selections[key] = selection;
+    }
+    preferences.botModelSelections = selections;
   }
   if (typeof parsed.useLastProjectForNewThreads === "boolean") {
     preferences.useLastProjectForNewThreads = parsed.useLastProjectForNewThreads;

@@ -317,8 +317,10 @@ describe("the list of runs", () => {
     expect(conversation.map((entry) => entry.run.runId)).toEqual(["first", "second"]);
     expect(workflowBotMessageText(first.run)).toBe("What is broken?");
     expect(workflowBotResponseText(first.run)).toBe("The build is missing an asset.");
-    expect(workflowBotConversationInput(conversation, "What changed?")).toEqual({
+    const model = { instanceId: "codex" as never, model: "gpt-5" };
+    expect(workflowBotConversationInput(conversation, "What changed?", model)).toEqual({
       message: "What changed?",
+      model,
       conversation: [
         { role: "person", text: "What is broken?" },
         { role: "bot", text: "The build is missing an asset." },

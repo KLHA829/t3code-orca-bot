@@ -1,4 +1,9 @@
-import { type EnvironmentId, type WorkflowRunReference } from "@t3tools/contracts";
+import {
+  type EnvironmentId,
+  ModelSelection,
+  ProviderInstanceId,
+  type WorkflowRunReference,
+} from "@t3tools/contracts";
 import { msg, T, useGT, useMessages } from "gt-react";
 import { LayoutGridIcon, WorkflowIcon } from "lucide-react";
 import * as Schema from "effect/Schema";
@@ -7,6 +12,7 @@ import { useState, type ReactNode } from "react";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { useNowMinute } from "../../hooks/useNowMinute";
 import { cn, randomUUID } from "../../lib/utils";
+import { useEnvironmentProviders } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { serverEnvironment } from "../../state/server";
@@ -14,7 +20,15 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
 import { ScrollArea } from "../ui/scroll-area";
-import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import {
+  Select,
+  SelectGroup,
+  SelectGroupLabel,
+  SelectItem,
+  SelectPopup,
+  SelectTrigger,
+  SelectValue,
+} from "../ui/select";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import {
   RelativeLabel,
@@ -692,6 +706,21 @@ function BotKanbanBoard({
   );
 }
 
+const botModelStorageSchema = Schema.NullOr(ModelSelection);
+
+const BOT_MODEL_SEPARATOR = "\u001f";
+const BOT_DEFAULT_MODEL_VALUE = "bot-default";
+const encodeBotModel = (selection: ModelSelection) =>
+  `${selection.instanceId}${BOT_MODEL_SEPARATOR}${selection.model}`;
+const decodeBotModel = (value: string): ModelSelection | null => {
+  const index = value.indexOf(BOT_MODEL_SEPARATOR);
+  if (index <= 0 || index === value.length - 1) return null;
+  return {
+    instanceId: ProviderInstanceId.make(value.slice(0, index)),
+    model: value.slice(index + BOT_MODEL_SEPARATOR.length),
+  };
+};
+
 const revealChatEnd = (element: HTMLElement | null) => {
   element?.scrollIntoView({ block: "end" });
 };
@@ -713,6 +742,24 @@ function BotConversation({
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const start = useAtomCommand(serverEnvironment.startWorkflowRun, { label: "bot chat send" });
+  const [modelOverride, setModelOverride] = useLocalStorage(
+    `t3code:bot-model:${environmentId}:${workflow}`,
+    null,
+    botModelStorageSchema,
+  );
+  const providers = useEnvironmentProviders().get(environmentId) ?? [];
+  const modelGroups = providers.flatMap((provider) => {
+    const usable =
+      provider.enabled &&
+      provider.installed &&
+      provider.availability !== "unavailable" &&
+      provider.auth.status !== "unauthenticated" &&
+      (provider.status === "ready" || provider.status === "warning" || provider.modelsRetained);
+    return usable && provider.models.length > 0 ? [{ provider, models: provider.models }] : [];
+  });
+  const selectedModelLabel = modelGroups
+    .flatMap(({ models }) => models)
+    .find((model) => model.slug === modelOverride?.model)?.name;
   const botName = workflow.replace(/^bot-/, "");
   const send = async () => {
     const message = draft.trim();
@@ -722,7 +769,7 @@ function BotConversation({
       environmentId,
       input: {
         workflow,
-        input: workflowBotConversationInput(nodes, message),
+        input: workflowBotConversationInput(nodes, message, modelOverride),
         idempotencyKey: `chat/${randomUUID()}`,
       },
     });
@@ -784,6 +831,46 @@ function BotConversation({
           void send();
         }}
       >
+        <Select
+          modal={false}
+          value={modelOverride ? encodeBotModel(modelOverride) : BOT_DEFAULT_MODEL_VALUE}
+          onValueChange={(value) => {
+            if (typeof value !== "string") return;
+            setModelOverride(value === BOT_DEFAULT_MODEL_VALUE ? null : decodeBotModel(value));
+          }}
+        >
+          <SelectTrigger
+            size="sm"
+            variant="ghost"
+            className="w-36 shrink-0"
+            aria-label={gt("Choose the bot model")}
+          >
+            <SelectValue>
+              {modelOverride ? (selectedModelLabel ?? modelOverride.model) : gt("Bot default")}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectPopup alignItemWithTrigger={false} matchTriggerWidth={false} className="w-64">
+            <SelectItem value={BOT_DEFAULT_MODEL_VALUE}>
+              <T>Bot default</T>
+            </SelectItem>
+            {modelGroups.map(({ provider, models }) => (
+              <SelectGroup key={provider.instanceId}>
+                <SelectGroupLabel>{provider.displayName ?? provider.instanceId}</SelectGroupLabel>
+                {models.map((model) => {
+                  const selection = { instanceId: provider.instanceId, model: model.slug };
+                  return (
+                    <SelectItem key={model.slug} value={encodeBotModel(selection)}>
+                      <span className="block truncate">
+                        {model.name}
+                        {model.isLegacy ? ` · ${gt("legacy")}` : ""}
+                      </span>
+                    </SelectItem>
+                  );
+                })}
+              </SelectGroup>
+            ))}
+          </SelectPopup>
+        </Select>
         <Input
           aria-label={gt("Message the bot")}
           value={draft}

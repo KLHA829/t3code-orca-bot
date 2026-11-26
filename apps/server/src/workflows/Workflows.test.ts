@@ -3807,7 +3807,7 @@ it.effect("a bot names and tags a direct job before it queues", () =>
         yield* agents.started(first.runId, "respond/0");
         const second = yield* workflows.start(
           "helper",
-          { message: "second" },
+          { message: "second", model: { instanceId: "codex", model: "gpt-5" } },
           { idempotencyKey: "bot-chat-second" },
         );
         const queued = yield* workflows.waitFor(
@@ -3820,12 +3820,37 @@ it.effect("a bot names and tags a direct job before it queues", () =>
         yield* agents.end(first.runId, "respond/0", {
           output: { summary: "Answered first.", response: "First answer." },
         });
-        yield* agents.started(second.runId, "respond/0");
+        const secondStarted = yield* agents.started(second.runId, "respond/0");
+        assert.deepStrictEqual(secondStarted.model, { instanceId: "codex", model: "gpt-5" });
         yield* agents.end(second.runId, "respond/0", {
           output: { summary: "Answered second.", response: "Second answer." },
         });
         yield* workflows.waitFor(first.runId, status("completed"));
         yield* workflows.waitFor(second.runId, status("completed"));
+
+        const third = yield* workflows.start(
+          "helper",
+          { message: "third" },
+          { idempotencyKey: "bot-chat-third" },
+        );
+        const thirdStarted = yield* agents.started(third.runId, "respond/0");
+        assert.deepStrictEqual(thirdStarted.model, { instanceId: "codex", model: "gpt-5" });
+        yield* agents.end(third.runId, "respond/0", {
+          output: { summary: "Answered third.", response: "Third answer." },
+        });
+        yield* workflows.waitFor(third.runId, status("completed"));
+
+        const reset = yield* workflows.start(
+          "helper",
+          { message: "fourth", model: null },
+          { idempotencyKey: "bot-chat-fourth" },
+        );
+        const resetStarted = yield* agents.started(reset.runId, "respond/0");
+        assert.equal(resetStarted.model, undefined);
+        yield* agents.end(reset.runId, "respond/0", {
+          output: { summary: "Answered fourth.", response: "Fourth answer." },
+        });
+        yield* workflows.waitFor(reset.runId, status("completed"));
       }).pipe(Effect.scoped),
       [helper],
     );

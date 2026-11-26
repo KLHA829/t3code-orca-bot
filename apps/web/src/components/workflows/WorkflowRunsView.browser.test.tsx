@@ -81,9 +81,25 @@ function setup(
   state.detailError = null;
   state.linked = [];
   state.sessionId = null;
+  window.localStorage.clear();
 }
 
 const environment = { environmentId, label: "Laptop" };
+const botProvider = {
+  instanceId: "codex",
+  driver: "codex",
+  displayName: "Codex",
+  enabled: true,
+  installed: true,
+  version: "1.0.0",
+  status: "ready",
+  auth: { status: "authenticated" },
+  checkedAt: at(0),
+  availability: "available",
+  models: [{ slug: "gpt-5", name: "GPT-5", isCustom: false, capabilities: null }],
+  slashCommands: [],
+  skills: [],
+};
 
 vi.mock("../../hooks/useNowMinute", { spy: true });
 vi.mock(import("../../state/server"), async (original) => {
@@ -149,6 +165,7 @@ vi.mock(import("../../state/environments"), async (original) => ({
   ...(await original()),
   useEnvironment: ((id: EnvironmentId | null) =>
     id === environmentId ? environment : null) as never,
+  useEnvironmentProviders: (() => new Map([[environmentId, [botProvider]]])) as never,
 }));
 // The chat's renderer loads its highlighter; a question's body only has to reach the page.
 vi.mock("../ChatMarkdown", () => ({
@@ -397,6 +414,8 @@ describe("WorkflowRunsView", () => {
     await expect.element(chat).toMatchTextContent("What is broken?");
     await expect.element(chat).toMatchTextContent("The build is missing an asset.");
     await expect.element(chat).toMatchTextContent("Can you fix it?");
+    await screen.getByRole("combobox", { name: "Choose the bot model" }).click();
+    await screen.getByRole("option", { name: "GPT-5" }).click();
     await userEvent.fill(screen.getByRole("textbox", { name: "Message the bot" }), "What changed?");
     await screen.getByRole("button", { name: "Send", exact: true }).click();
 
@@ -407,6 +426,7 @@ describe("WorkflowRunsView", () => {
       workflow: "bot-triage",
       input: {
         message: "What changed?",
+        model: { instanceId: "codex", model: "gpt-5" },
         conversation: [
           { role: "person", text: "What is broken?" },
           { role: "bot", text: "The build is missing an asset." },
