@@ -24,6 +24,7 @@ import {
 import {
   RunContext,
   step,
+  skip,
   stop,
   tags,
   title,
@@ -228,6 +229,71 @@ Do the job in the project. When it needs a decision or approval that you cannot 
 ${input.teammates.length === 0 ? "" : "- handoffs: at most 3 handoffs as { bot, message }, one per teammate bot that should pick up part of this work. bot is the teammate's name. Omit it when nothing needs handing off.\n"}
 Do not include transient status in memoryNote. Never post secrets or credentials in response. Never merge, force-push, delete branches, or publish releases unless the job explicitly asks for exactly that.`;
 
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** A GitHub webhook delivery, when the payload is one: the event name and its decoded body. */
+const githubWebhookOf = (
+  payload: Schema.Json,
+): { readonly event: string; readonly json: Record<string, unknown> } | undefined => {
+  if (!isWebhookRequest(payload)) return undefined;
+  const event = payload.headers["x-github-event"];
+  if (event === undefined) return undefined;
+  try {
+    const json: unknown = JSON.parse(payload.body);
+    if (typeof json !== "object" || json === null || Array.isArray(json)) return undefined;
+    return { event, json: json as Record<string, unknown> };
+  } catch {
+    return undefined;
+  }
+};
+
+const objectAt = (json: Record<string, unknown>, key: string) => {
+  const value = json[key];
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+};
+
+const stringAt = (json: Record<string, unknown> | undefined, key: string) =>
+  json !== undefined && typeof json[key] === "string" ? (json[key] as string) : undefined;
+
+/** What a GitHub delivery means for the bot: a mention to answer, a CI failure to fix, or noise. */
+const githubJobOf = (
+  github: { readonly event: string; readonly json: Record<string, unknown> },
+  name: string,
+):
+  | { readonly kind: "mention"; readonly issueUrl: string; readonly label: string }
+  | { readonly kind: "ci-failure"; readonly label: string }
+  | { readonly kind: "noise"; readonly reason: string } => {
+  const { event, json } = github;
+  if (event === "issue_comment") {
+    const comment = objectAt(json, "comment");
+    const issue = objectAt(json, "issue");
+    const body = stringAt(comment, "body") ?? "";
+    const slug = name.startsWith("bot-") ? name.slice(4) : name;
+    const mention = new RegExp(`@${escapeRegExp(slug)}(?:-bot)?\\b|@bot\\b`, "i").test(body);
+    if (json.action !== "created" || !mention) {
+      return { kind: "noise", reason: "The comment does not mention this bot." };
+    }
+    const number = typeof issue?.number === "number" ? `#${issue.number}` : "the issue";
+    return {
+      kind: "mention",
+      issueUrl: stringAt(issue, "html_url") ?? "",
+      label: `mention on ${number}`,
+    };
+  }
+  if (event === "check_suite" || event === "check_run" || event === "workflow_run") {
+    const subject = objectAt(json, event) ?? {};
+    const conclusion = stringAt(subject, "conclusion");
+    if (json.action !== "completed" || conclusion !== "failure") {
+      return { kind: "noise", reason: "The check did not fail." };
+    }
+    const checkName = stringAt(subject, "name") ?? event;
+    return { kind: "ci-failure", label: `CI failure: ${checkName}` };
+  }
+  return { kind: "noise", reason: `Nothing to do for a GitHub ${event} delivery.` };
+};
+
 /** A trigger a bot can react to. The event payload is decoded by the bot itself. */
 export type BotTrigger = ScheduleTrigger | WebhookTrigger | OpenedTrigger;
 
@@ -369,12 +435,27 @@ export const bot = (
       triggers: (options.triggers ?? []) as ReadonlyArray<Trigger<Schema.Json>>,
     },
     Effect.fn(function* (payload) {
-      const event = eventOf(payload);
+      const github = githubWebhookOf(payload);
+      const githubJob = github === undefined ? undefined : githubJobOf(github, name);
+      const event =
+        githubJob !== undefined && githubJob.kind !== "noise"
+          ? {
+              kind: "webhook" as const,
+              label: githubJob.label,
+              origin:
+                githubJob.kind === "mention"
+                  ? "Someone mentioned this bot in a comment. The comment and its context are in the payload; answer what it asks."
+                  : "A CI check failed. The failure details are in the payload; diagnose and fix the cause in the project.",
+            }
+          : eventOf(payload);
       const directModel = directModelOf(payload);
       yield* title(`${name}: ${event.label}`);
       yield* tags(["bot", `bot:${event.kind}`]);
       // Tag and name direct jobs before they queue, so a chat message stays visible while the bot is busy.
       const work = Effect.gen(function* () {
+        if (githubJob?.kind === "noise") {
+          return yield* skip(githubJob.reason);
+        }
         const context = yield* step(
           "context",
           { returns: BotContext },
@@ -531,7 +612,12 @@ export const bot = (
         }
 
         const response = result.value.response.trim();
-        const replyTarget = isIssue(payload) || isPullRequest(payload);
+        const mentionIssueUrl =
+          githubJob?.kind === "mention" && githubJob.issueUrl !== ""
+            ? githubJob.issueUrl
+            : undefined;
+        const replyTarget =
+          isIssue(payload) || isPullRequest(payload) || mentionIssueUrl !== undefined;
         let postApproved = true;
         if (
           response.length > 0 &&
@@ -558,6 +644,12 @@ export const bot = (
             yield* step("reply", { returns: Schema.Void }, issues.comment(payload, response));
           } else if (isPullRequest(payload)) {
             yield* step("reply", { returns: Schema.Void }, pullRequests.comment(payload, response));
+          } else if (mentionIssueUrl !== undefined) {
+            yield* step(
+              "reply",
+              { returns: Schema.Void },
+              issues.comment({ project: options.project, url: mentionIssueUrl }, response),
+            );
           }
         }
 

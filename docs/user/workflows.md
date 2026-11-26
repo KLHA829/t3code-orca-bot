@@ -61,6 +61,8 @@ Optional bot behaviors, set at creation or by editing the generated workflow fil
 - `--max-jobs-per-day <n>`: a daily budget; once n jobs have started in a day, further jobs stop immediately with the budget reason.
 - `--notify-webhook <url>`: posts a short JSON message to a Slack or Discord webhook when the bot finishes a job or needs a reply approved.
 
+Point a GitHub repository webhook (content type `application/json`, events **Issue comments** and **Check runs**, **Check suites**, or **Workflow runs**) at the bot's hook URL and it gains two more triggers with no extra setup: a comment mentioning `@bot` or the bot's name starts a job and the reply is posted back to that issue or pull request, and a failing CI check starts a repair job. Deliveries that are neither a mention nor a failure end as skipped runs, so they cost nothing.
+
 A bot reads back the memories relevant to each job instead of only the newest ones, so long-lived bots keep using old facts. When several bots share one bots directory they see each other as teammates and can hand off work: the agent returns handoffs naming a teammate and a message, and the teammate bot starts its own durable job with that message. Choose the bot's provider instance and model with `--provider-instance <instance> --model <model>`; without them it uses the server's normal default. To change the model later, edit the generated workflow file's `agent.model`. Regardless of triggers, give the bot a direct job with:
 
 ```sh

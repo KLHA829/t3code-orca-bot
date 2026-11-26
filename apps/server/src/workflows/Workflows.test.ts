@@ -4053,6 +4053,84 @@ it.effect("a bot hands off to a teammate bot", () =>
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );
 
+it.effect("a bot answers mentions and skips comments that do not mention it", () =>
+  Effect.gen(function* () {
+    const { boot, agents } = yield* harness();
+    const helper = bot("mention-bot", {
+      project: "project-1",
+      purpose: "Answer mentions.",
+    });
+    const comment = (body: string) => ({
+      method: "POST",
+      headers: { "x-github-event": "issue_comment" },
+      query: "",
+      body: JSON.stringify({
+        action: "created",
+        comment: { body },
+        issue: { number: 7, html_url: "https://github.com/acme/project/issues/7" },
+      }),
+    });
+    yield* boot(
+      Effect.gen(function* () {
+        const workflows = yield* Workflows.Workflows;
+        const noise = yield* workflows.start("mention-bot", comment("just a comment"), {
+          idempotencyKey: "bot-mention-noise",
+        });
+        const skipped = yield* workflows.waitFor(noise.runId, status("skipped"));
+        assert.include(skipped.detail ?? "", "does not mention");
+        const mention = yield* workflows.start("mention-bot", comment("@mention-bot hi there"), {
+          idempotencyKey: "bot-mention-job",
+        });
+        const started = yield* agents.started(mention.runId, "respond/0");
+        assert.include(started.prompt, "hi there");
+        yield* agents.end(mention.runId, "respond/0", {
+          output: { summary: "Answered.", response: "Hello!" },
+        });
+        yield* workflows.waitFor(mention.runId, status("completed"));
+      }).pipe(Effect.scoped),
+      [helper],
+    );
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);
+
+it.effect("a bot skips CI deliveries that are not failures", () =>
+  Effect.gen(function* () {
+    const { boot, agents } = yield* harness();
+    const helper = bot("ci-bot", {
+      project: "project-1",
+      purpose: "Fix CI failures.",
+    });
+    const delivery = (conclusion: string) => ({
+      method: "POST",
+      headers: { "x-github-event": "workflow_run" },
+      query: "",
+      body: JSON.stringify({
+        action: "completed",
+        workflow_run: { name: "CI", conclusion },
+      }),
+    });
+    yield* boot(
+      Effect.gen(function* () {
+        const workflows = yield* Workflows.Workflows;
+        const passing = yield* workflows.start("ci-bot", delivery("success"), {
+          idempotencyKey: "bot-ci-pass",
+        });
+        yield* workflows.waitFor(passing.runId, status("skipped"));
+        const failing = yield* workflows.start("ci-bot", delivery("failure"), {
+          idempotencyKey: "bot-ci-fail",
+        });
+        const started = yield* agents.started(failing.runId, "respond/0");
+        assert.include(started.prompt, "CI failure");
+        yield* agents.end(failing.runId, "respond/0", {
+          output: { summary: "Fixed.", response: "" },
+        });
+        yield* workflows.waitFor(failing.runId, status("completed"));
+      }).pipe(Effect.scoped),
+      [helper],
+    );
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);
+
 it.effect("a bot pauses when its purpose file is missing", () =>
   Effect.gen(function* () {
     const { boot, directory } = yield* harness();
