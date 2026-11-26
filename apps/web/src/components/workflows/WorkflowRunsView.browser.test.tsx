@@ -9,6 +9,7 @@ import {
 } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { page as browserPage, userEvent } from "vite-plus/test/browser";
+import { useState, type ComponentProps } from "react";
 
 import "~/index.css";
 import { render } from "../../../test/render";
@@ -196,6 +197,25 @@ async function desktop() {
   return { [Symbol.asyncDispose]: () => browserPage.viewport(width, height) };
 }
 
+type RunsViewProps = ComponentProps<typeof WorkflowRunsView>;
+
+function WorkflowRunsHarness({
+  initialBoard = null,
+  ...props
+}: Omit<RunsViewProps, "board" | "onBoardChange"> & { readonly initialBoard?: string | null }) {
+  const [board, setBoard] = useState<string | null>(initialBoard);
+  return (
+    <WorkflowRunsView
+      {...props}
+      board={board}
+      onBoardChange={(next, runId) => {
+        setBoard(next);
+        if (runId !== undefined && runId !== null) props.onSelect(runId);
+      }}
+    />
+  );
+}
+
 const page = (
   selectedRunId: string | null = null,
   on: {
@@ -204,8 +224,9 @@ const page = (
     readonly reference?: () => void;
   } = {},
   shownTab: WorkflowPaneTab | null = null,
+  initialBoard: string | null = null,
 ) => (
-  <WorkflowRunsView
+  <WorkflowRunsHarness
     environmentId={environmentId}
     selectedRunId={selectedRunId}
     paneOpen={shownTab !== null}
@@ -214,6 +235,7 @@ const page = (
     onOpenThread={on.thread ?? vi.fn()}
     onOpenReference={on.reference ?? vi.fn()}
     onOpenDefinitions={vi.fn()}
+    initialBoard={initialBoard}
   />
 );
 
@@ -314,6 +336,32 @@ describe("WorkflowRunsView", () => {
     expect(select).toHaveBeenCalledWith("work");
     await expect.element(screen.getByRole("navigation", { name: "Workflow runs" })).toBeVisible();
     vi.mocked(useNowMinute).mockRestore();
+  });
+
+  it("opens the board narrowed to one bot", async () => {
+    setup({
+      runs: [
+        run({
+          runId: "triage-job",
+          workflow: "bot-triage",
+          title: "Triage job",
+          tags: ["bot"],
+        }),
+        run({
+          runId: "release-job",
+          workflow: "bot-release",
+          title: "Release job",
+          tags: ["bot"],
+        }),
+      ],
+      questions: [],
+    });
+    await using _desktop = await desktop();
+    await using screen = await render(page(null, {}, null, "bot-triage"));
+
+    const working = screen.getByRole("region", { name: "Working" });
+    await expect.element(working).toMatchTextContent("Triage job");
+    await expect.element(screen.getByText("Release job")).not.toBeInTheDocument();
   });
 
   it("shows what choices do and the links, and sends a choice that needs a reason only with one", async () => {

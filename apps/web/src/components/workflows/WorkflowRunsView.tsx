@@ -85,6 +85,8 @@ export function WorkflowsEmpty({
 /** One environment's runs: the list to pick from, and the picked run told as a feed. */
 export function WorkflowRunsView({
   environmentId,
+  board: boardName,
+  onBoardChange,
   selectedRunId,
   paneOpen,
   shownTab,
@@ -94,6 +96,9 @@ export function WorkflowRunsView({
   onOpenDefinitions,
 }: {
   readonly environmentId: EnvironmentId;
+  /** Open bot board: `all` or one bot workflow; null for the run list. */
+  readonly board: string | null;
+  readonly onBoardChange: (board: string | null, runId?: string | null) => void;
   readonly selectedRunId: string | null;
   /** Something is open beside the run, so the list makes room below `xl`. */
   readonly paneOpen: boolean;
@@ -111,7 +116,6 @@ export function WorkflowRunsView({
   const gt = useGT();
   const m = useMessages();
   const [showSkipped, setShowSkipped] = useState(false);
-  const [board, setBoard] = useState(false);
   const nowMinute = useNowMinute();
   const snapshot = live.data;
   if (live.error) {
@@ -282,31 +286,40 @@ export function WorkflowRunsView({
     onSelect((row === undefined ? null : askingKind([row], kind)?.run.runId) ?? runId);
   };
   const isBot = (node: WorkflowRunNode) => node.run.tags?.includes("bot") === true;
-  const botNeeds = lists["needs-you"].filter(isBot);
-  const needing = new Set(botNeeds.map((node) => node.run.runId));
-  const botWorking = lists.running.filter((node) => isBot(node) && !needing.has(node.run.runId));
+  const everyBotNeed = lists["needs-you"].filter(isBot);
+  const needing = new Set(everyBotNeed.map((node) => node.run.runId));
+  const everyBotWorking = lists.running.filter(
+    (node) => isBot(node) && !needing.has(node.run.runId),
+  );
   const startOfToday = new Date(Date.parse(`${nowMinute}:00.000Z`));
   startOfToday.setHours(0, 0, 0, 0);
   const endedToday = (node: WorkflowRunNode) =>
     node.run.endedAt !== null && Date.parse(node.run.endedAt) >= startOfToday.getTime();
-  const botDone = lists.all.filter(
+  const everyBotDone = lists.all.filter(
     (node) => isBot(node) && node.run.status === "completed" && endedToday(node),
   );
-  const botClosed = lists.all.filter(
+  const everyBotClosed = lists.all.filter(
     (node) =>
       isBot(node) &&
       (node.run.status === "stopped" || node.run.status === "cancelled") &&
       endedToday(node),
   );
   const botCount = new Set(
-    [...botNeeds, ...botWorking, ...botDone, ...botClosed].map((node) => node.run.runId),
+    [...everyBotNeed, ...everyBotWorking, ...everyBotDone, ...everyBotClosed].map(
+      (node) => node.run.runId,
+    ),
   ).size;
-  const openBoardRun = (runId: string) => {
-    setBoard(false);
-    onSelect(runId);
-  };
+  const inBoard = (nodes: ReadonlyArray<WorkflowRunNode>) =>
+    boardName === null || boardName === "all"
+      ? nodes
+      : nodes.filter((node) => node.run.workflow === boardName);
+  const botNeeds = inBoard(everyBotNeed);
+  const botWorking = inBoard(everyBotWorking);
+  const botDone = inBoard(everyBotDone);
+  const botClosed = inBoard(everyBotClosed);
+  const openBoardRun = (runId: string) => onBoardChange(null, runId);
   const currentRunId = listedFor(shown);
-  if (board) {
+  if (boardName !== null) {
     return (
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {problemAlert}
@@ -317,7 +330,7 @@ export function WorkflowRunsView({
           closed={botClosed}
           environmentId={environmentId}
           onOpen={openBoardRun}
-          onShowRuns={() => setBoard(false)}
+          onShowRuns={() => onBoardChange(null)}
         />
       </div>
     );
@@ -351,7 +364,12 @@ export function WorkflowRunsView({
               ))}
             </ToggleGroup>
             {botCount === 0 ? null : (
-              <Button size="sm" variant="outline" className="w-full" onClick={() => setBoard(true)}>
+              <Button
+                size="sm"
+                variant="outline"
+                className="w-full"
+                onClick={() => onBoardChange("all")}
+              >
                 <LayoutGridIcon />
                 <T>Bot board</T>
               </Button>

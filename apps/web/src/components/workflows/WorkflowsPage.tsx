@@ -42,6 +42,8 @@ const WorkflowDefinitionEditor = lazy(() => import("./WorkflowDefinitionEditor")
 export interface WorkflowsSearch extends WorkflowPaneState {
   readonly env?: string;
   readonly run?: string;
+  /** Open the bot board, narrowed to one bot workflow unless `all`. */
+  readonly board?: string;
   /** Show the definition files instead of the runs: all of them, or `file` in the editor. */
   readonly definitions?: boolean;
   readonly file?: string;
@@ -296,6 +298,14 @@ export function WorkflowsPage() {
               selectedRunId={search.run ?? null}
               paneOpen={paneOpen}
               shownTab={shownTab}
+              board={search.board ?? null}
+              onBoardChange={(board, runId) =>
+                select({
+                  ...env,
+                  ...(runId === undefined ? run : runId === null ? {} : { run: runId }),
+                  ...(board === null ? {} : { board }),
+                })
+              }
               onSelect={(runId) => select({ ...env, ...(runId === null ? {} : { run: runId }) })}
               onOpenThread={(runId, thread) =>
                 togglePane(runId, {

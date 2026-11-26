@@ -534,6 +534,7 @@ describe("sidebar settled pagination", () => {
           activeProject.environmentId,
           {
             scratchWorkspaceRoot: null,
+            settings: { workflowsEnabled: false },
             shellThreadFamilies: false,
           } as unknown as EnvironmentServerConfig,
         ],

@@ -26,19 +26,21 @@ function matchedSearch(url: string) {
 }
 
 describe("workflows route search", () => {
-  it("cuts a long env, run and file before an emoji the limit would split", () => {
+  it("cuts a long env, run, board and file before an emoji the limit would split", () => {
     const env = "a".repeat(199);
     const run = "b".repeat(199);
     const file = "c".repeat(199);
+    const board = "d".repeat(199);
     expect(
       matchedSearch(
         `/workflows?${new URLSearchParams({
           env: `${env}😀`,
           run: `${run}🐛`,
           file: `${file}🚀`,
+          board: `${board}🤖`,
         })}`,
       ),
-    ).toMatchObject({ env, run, file });
+    ).toMatchObject({ env, run, file, board });
   });
 
   it("clears an unusable pane or tab instead of keeping the raw search value", () => {
