@@ -3889,6 +3889,33 @@ it.effect("a bot bounds the memory it journals and prompts with", () =>
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );
 
+it.effect("a bot bounds an overlong purpose", () =>
+  Effect.gen(function* () {
+    const { boot, agents } = yield* harness();
+    const helper = bot("helper", {
+      project: "project-1",
+      purpose: `${"p".repeat(70_000)}\npurpose tail`,
+    });
+    yield* boot(
+      Effect.gen(function* () {
+        const workflows = yield* Workflows.Workflows;
+        const { runId } = yield* workflows.start(
+          "helper",
+          { message: "hello" },
+          { idempotencyKey: "bot-purpose-large" },
+        );
+        const started = yield* agents.started(runId, "respond/0");
+        assert.notInclude(started.prompt, "purpose tail");
+        yield* agents.end(runId, "respond/0", {
+          output: { summary: "Answered.", response: "Hello." },
+        });
+        yield* workflows.waitFor(runId, status("completed"));
+      }).pipe(Effect.scoped),
+      [helper],
+    );
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);
+
 it.effect("a bot pauses when its purpose file is missing", () =>
   Effect.gen(function* () {
     const { boot, directory } = yield* harness();

@@ -27,6 +27,7 @@ import type { AgentLaunch, AgentModel } from "./WorkflowAgents.ts";
 import { Issue, PullRequest } from "./WorkflowForge.ts";
 
 const EVENT_JSON_LIMIT = 20_000;
+const PURPOSE_CONTEXT_LIMIT = 64_000;
 const MEMORY_CONTEXT_LIMIT = 64_000;
 
 /** What the bot's agent returns for one job. Empty text means none of that output is needed. */
@@ -122,6 +123,9 @@ const jsonForPrompt = (value: Schema.Json) => {
     ? text
     : `${text.slice(0, EVENT_JSON_LIMIT)}\n… ${text.length - EVENT_JSON_LIMIT} more characters`;
 };
+
+const purposeForPrompt = (purpose: string) =>
+  purpose.length <= PURPOSE_CONTEXT_LIMIT ? purpose : purpose.slice(0, PURPOSE_CONTEXT_LIMIT);
 
 const memoryForPrompt = (memory: string) =>
   memory.length <= MEMORY_CONTEXT_LIMIT
@@ -278,14 +282,17 @@ export const bot = (
           Effect.gen(function* () {
             const files = yield* Effect.tryPromise({
               try: async () => ({
-                purpose: [
-                  options.purpose ?? "",
-                  options.purposeFile === undefined
-                    ? ""
-                    : await NodeFSP.readFile(options.purposeFile, "utf8"),
-                ]
-                  .filter((part) => part.trim().length > 0)
-                  .join("\n\n"),
+                purpose: purposeForPrompt(
+                  [
+                    options.purpose ?? "",
+                    options.purposeFile === undefined
+                      ? ""
+                      : await NodeFSP.readFile(options.purposeFile, "utf8"),
+                  ]
+                    .filter((part) => part.trim().length > 0)
+                    .join("\n\n"),
+                ),
+
                 memory:
                   options.memoryFile === undefined
                     ? ""
