@@ -5,6 +5,7 @@ import {
   workflowChip,
   workflowQuestionKinds,
   workflowRunAsksKind,
+  workflowBotLanes,
   workflowRunLists,
   workflowRunNow,
   workflowRunState,
@@ -18,7 +19,7 @@ import * as Option from "effect/Option";
 import { AsyncResult } from "effect/reactivity";
 import { useNavigation } from "@react-navigation/native";
 import { msg, useGT, useMessages } from "gt-react-native";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -29,6 +30,7 @@ import { EmptyState } from "../../components/ui/EmptyState";
 import { ScreenScrollView } from "../../components/ui/ScreenScrollView";
 import { SegmentedControl } from "../../components/ui/SegmentedControl";
 import { cn } from "../../lib/cn";
+import { useNowMinuteMs } from "../../lib/clock";
 import { useEnvironments } from "../../state/environments";
 import { mobilePreferencesAtom, saveMobilePreferences } from "../../state/preferences";
 import { formatEnvironmentQueryError } from "../../state/query";
@@ -41,8 +43,14 @@ const TABS = [
     label: msg("Needs you", { $context: "tab, workflow runs waiting on the user" }),
   },
   { value: "running", label: msg("Running", { $context: "tab, workflow runs under way" }) },
+  { value: "bots", label: msg("Bots", { $context: "tab, bot workflow runs" }) },
   { value: "all", label: msg("All", { $context: "tab, all workflow runs" }) },
-] as const satisfies ReadonlyArray<{ readonly value: WorkflowListTab; readonly label: string }>;
+] as const satisfies ReadonlyArray<{
+  readonly value: MobileWorkflowListTab;
+  readonly label: string;
+}>;
+
+type MobileWorkflowListTab = WorkflowListTab | "bots";
 
 const NOTHING: Record<WorkflowListTab, string> = {
   "needs-you": msg("Nothing waits on you."),
@@ -112,12 +120,93 @@ function RunRow(props: { readonly node: WorkflowRunNode; readonly onOpen: () => 
   );
 }
 
+function EnvironmentBotRuns(props: {
+  readonly label: ReactNode;
+  readonly workflows: WorkflowRunsSnapshot["workflows"];
+  readonly lists: Readonly<Record<WorkflowListTab, ReadonlyArray<WorkflowRunNode>>>;
+  readonly openRun: (node: WorkflowRunNode) => () => void;
+}) {
+  const gt = useGT();
+  const nowMinuteMs = useNowMinuteMs();
+  const [bot, setBot] = useState<string | null>(null);
+  const botNames = props.workflows
+    .map((workflow) => workflow.name)
+    .filter((name) => name.startsWith("bot-"));
+  const unfiltered = workflowBotLanes(props.lists, nowMinuteMs);
+  const inBot = (nodes: ReadonlyArray<WorkflowRunNode>) =>
+    bot === null ? nodes : nodes.filter((node) => node.run.workflow === bot);
+  const lanes = {
+    needsYou: inBot(unfiltered.needsYou),
+    working: inBot(unfiltered.working),
+    done: inBot(unfiltered.done),
+    closed: inBot(unfiltered.closed),
+  };
+  const sections = [
+    { id: "needs-you", title: gt("Needs you"), nodes: lanes.needsYou },
+    { id: "working", title: gt("Working"), nodes: lanes.working },
+    { id: "done", title: gt("Done"), nodes: lanes.done },
+    { id: "closed", title: gt("Closed"), nodes: lanes.closed },
+  ].filter((lane) => lane.nodes.length > 0);
+  return (
+    <View>
+      {props.label}
+      {botNames.length === 0 ? null : (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerClassName="gap-2 px-5 pt-2"
+        >
+          <Chip label={gt("All bots")} selected={bot === null} onPress={() => setBot(null)} />
+          {botNames.map((name) => (
+            <Chip
+              key={name}
+              label={name.replace(/^bot-/, "")}
+              selected={bot === name}
+              onPress={() => setBot(name)}
+            />
+          ))}
+        </ScrollView>
+      )}
+      {sections.length === 0 ? (
+        <View className="px-5 py-6">
+          <Text className="text-center text-sm text-foreground-muted">
+            {gt("No bot jobs yet.")}
+          </Text>
+          <Text className="pt-1 text-center text-xs text-foreground-muted">
+            {gt("Create a bot with `t3 bot create`, then ask it for a job.")}
+          </Text>
+        </View>
+      ) : (
+        sections.map((lane) => (
+          <View key={lane.id}>
+            <View
+              accessible
+              accessibilityRole="header"
+              className="flex-row items-center border-b border-border-subtle px-5 pb-1.5 pt-4"
+            >
+              <Text className="min-w-0 flex-1 font-t3-medium text-xs text-foreground-muted">
+                {lane.title}
+              </Text>
+              <Text className="text-xs text-foreground-muted tabular-nums">
+                {lane.nodes.length}
+              </Text>
+            </View>
+            {lane.nodes.map((node) => (
+              <RunRow key={node.run.runId} node={node} onOpen={props.openRun(node)} />
+            ))}
+          </View>
+        ))
+      )}
+    </View>
+  );
+}
+
 /** One environment's runs in the picked list. */
 function EnvironmentRuns(props: {
   readonly environmentId: EnvironmentId;
   readonly label: string | null;
   readonly snapshot: WorkflowRunsSnapshot;
-  readonly tab: WorkflowListTab;
+  readonly tab: MobileWorkflowListTab;
   /** The kind of question to narrow Needs you to; null for every run in it. */
   readonly kind: string | null;
 }) {
@@ -127,9 +216,30 @@ function EnvironmentRuns(props: {
   const [showSkipped, setShowSkipped] = useState(false);
   const { snapshot, tab } = props;
   const visible = listedWorkflowRuns(snapshot.runs, showSkipped);
-  const inTab = workflowRunLists(
-    groupWorkflowRuns(snapshot.workflows, visible.runs, snapshot.questions),
-  )[tab];
+  const groups = groupWorkflowRuns(snapshot.workflows, visible.runs, snapshot.questions);
+  const lists = workflowRunLists(groups);
+  const openRun = (node: WorkflowRunNode) => () =>
+    navigation.navigate("WorkflowRun", {
+      environmentId: props.environmentId,
+      runId: node.run.runId,
+    });
+  const label =
+    props.label === null ? null : (
+      <Text className="px-5 pb-1 pt-3 font-t3-medium text-xs text-foreground-muted">
+        {props.label}
+      </Text>
+    );
+  if (tab === "bots") {
+    return (
+      <EnvironmentBotRuns
+        label={label}
+        workflows={snapshot.workflows}
+        lists={lists}
+        openRun={openRun}
+      />
+    );
+  }
+  const inTab = lists[tab];
   const kind = tab === "needs-you" ? props.kind : null;
   const listed =
     kind === null
@@ -137,28 +247,13 @@ function EnvironmentRuns(props: {
       : inTab.filter((node) => workflowRunAsksKind(snapshot.workflows, node, kind));
   return (
     <View>
-      {props.label === null ? null : (
-        <Text className="px-5 pb-1 pt-3 font-t3-medium text-xs text-foreground-muted">
-          {props.label}
-        </Text>
-      )}
+      {label}
       {listed.length === 0 ? (
         <Text className="px-5 py-6 text-center text-sm text-foreground-muted">
           {kind === null ? m(NOTHING[tab]) : gt("No questions of this kind wait on you.")}
         </Text>
       ) : (
-        listed.map((node) => (
-          <RunRow
-            key={node.run.runId}
-            node={node}
-            onOpen={() =>
-              navigation.navigate("WorkflowRun", {
-                environmentId: props.environmentId,
-                runId: node.run.runId,
-              })
-            }
-          />
-        ))
+        listed.map((node) => <RunRow key={node.run.runId} node={node} onOpen={openRun(node)} />)
       )}
       {tab === "all" && visible.skipped > 0 ? (
         <Pressable
@@ -195,7 +290,7 @@ const needsYouSources = (snapshots: ReadonlyArray<WorkflowRunsSnapshot>) =>
 /** The Workflows tab: what waits on you first, in every environment this device is connected to. */
 export function WorkflowsScreen() {
   const { environments, isReady } = useEnvironments();
-  const [tab, setTab] = useState<WorkflowListTab | null>(null);
+  const [tab, setTab] = useState<MobileWorkflowListTab | null>(null);
   const insets = useSafeAreaInsets();
   const gt = useGT();
   const m = useMessages();
@@ -224,7 +319,10 @@ export function WorkflowsScreen() {
     };
   });
   const withRuns = sections.flatMap(({ environment, snapshot }) =>
-    snapshot !== null && snapshot.runs.length > 0 ? [{ environment, snapshot }] : [],
+    snapshot !== null &&
+    (snapshot.runs.length > 0 || snapshot.workflows.some(({ name }) => name.startsWith("bot-")))
+      ? [{ environment, snapshot }]
+      : [],
   );
   const settled = sections.every(({ snapshot, error }) => snapshot !== null || error !== null);
   // Open on the most pressing list any environment has.

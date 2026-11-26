@@ -5,6 +5,7 @@ import {
   type WorkflowRunReference,
   type WorkflowStep,
 } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -19,6 +20,7 @@ import {
   workflowAgentSummary,
   isOwnWorkflowAnswer,
   workflowAnswer,
+  workflowBotLanes,
   workflowWithdrawal,
   workflowChip,
   workflowFlowFocus,
@@ -236,6 +238,56 @@ describe("the list of runs", () => {
       ),
     ).all;
     expect(ids(invoked.filter((node) => workflowRunInvolves(node, "check")))).toEqual(["parent"]);
+  });
+
+  it("sorts bot runs into board lanes, with only today's endings", () => {
+    const zoned = (monthDay: number, hour: number) =>
+      DateTime.makeZonedUnsafe(
+        { year: 2026, month: 11, day: monthDay, hour },
+        { timeZone: DateTime.zoneMakeLocal(), adjustForTimeZone: true },
+      );
+    const local = (monthDay: number, hour: number) => DateTime.formatIso(zoned(monthDay, hour));
+    const nowMs = DateTime.toEpochMillis(zoned(1, 12));
+    const bot = { tags: ["bot"] };
+    const groups = groupWorkflowRuns(
+      [],
+      [
+        run("need", { ...bot, status: "waiting", updatedAt: local(1, 8) }),
+        run("work", { ...bot, updatedAt: local(1, 9) }),
+        run("done", {
+          ...bot,
+          status: "completed",
+          updatedAt: local(1, 10),
+          endedAt: local(1, 10),
+        }),
+        run("closed", {
+          ...bot,
+          status: "cancelled",
+          updatedAt: local(1, 11),
+          endedAt: local(1, 11),
+        }),
+        run("old", {
+          ...bot,
+          status: "completed",
+          updatedAt: local(1, 11),
+          endedAt: DateTime.formatIso(
+            DateTime.makeZonedUnsafe(
+              { year: 2026, month: 10, day: 31, hour: 23 },
+              { timeZone: DateTime.zoneMakeLocal(), adjustForTimeZone: true },
+            ),
+          ),
+        }),
+        run("ordinary", { status: "completed", updatedAt: local(1, 11), endedAt: local(1, 11) }),
+      ],
+      [question("need")],
+    );
+    const lanes = workflowBotLanes(workflowRunLists(groups), nowMs);
+    const ids = (nodes: ReadonlyArray<{ readonly run: WorkflowRun }>) =>
+      nodes.map((node) => node.run.runId);
+    expect(ids(lanes.needsYou)).toEqual(["need"]);
+    expect(ids(lanes.working)).toEqual(["work"]);
+    expect(ids(lanes.done)).toEqual(["done"]);
+    expect(ids(lanes.closed)).toEqual(["closed"]);
   });
 
   it("counts the open questions by kind, in the order declared, with the rest as other", () => {

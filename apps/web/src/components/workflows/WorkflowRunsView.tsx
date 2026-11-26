@@ -32,6 +32,7 @@ import {
   workflowQuestionKinds,
   workflowRunAskingKind,
   workflowRunAsksKind,
+  workflowBotLanes,
   workflowRunLists,
   workflowRunNow,
   workflowTriggerLine,
@@ -285,25 +286,11 @@ export function WorkflowRunsView({
     const row = kind === EVERY_KIND ? undefined : listed.find((node) => node.run.runId === runId);
     onSelect((row === undefined ? null : askingKind([row], kind)?.run.runId) ?? runId);
   };
-  const isBot = (node: WorkflowRunNode) => node.run.tags?.includes("bot") === true;
-  const everyBotNeed = lists["needs-you"].filter(isBot);
-  const needing = new Set(everyBotNeed.map((node) => node.run.runId));
-  const everyBotWorking = lists.running.filter(
-    (node) => isBot(node) && !needing.has(node.run.runId),
-  );
-  const startOfToday = new Date(Date.parse(`${nowMinute}:00.000Z`));
-  startOfToday.setHours(0, 0, 0, 0);
-  const endedToday = (node: WorkflowRunNode) =>
-    node.run.endedAt !== null && Date.parse(node.run.endedAt) >= startOfToday.getTime();
-  const everyBotDone = lists.all.filter(
-    (node) => isBot(node) && node.run.status === "completed" && endedToday(node),
-  );
-  const everyBotClosed = lists.all.filter(
-    (node) =>
-      isBot(node) &&
-      (node.run.status === "stopped" || node.run.status === "cancelled") &&
-      endedToday(node),
-  );
+  const botLanes = workflowBotLanes(lists, Date.parse(`${nowMinute}:00.000Z`));
+  const everyBotNeed = botLanes.needsYou;
+  const everyBotWorking = botLanes.working;
+  const everyBotDone = botLanes.done;
+  const everyBotClosed = botLanes.closed;
   const botCount = new Set(
     [...everyBotNeed, ...everyBotWorking, ...everyBotDone, ...everyBotClosed].map(
       (node) => node.run.runId,

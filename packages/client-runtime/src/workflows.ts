@@ -13,6 +13,7 @@ import {
   type WorkflowStep,
   type WorkflowSummary,
 } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { formatDuration } from "@t3tools/shared/orchestrationTiming";
@@ -275,6 +276,45 @@ export function workflowRunLists(
     "needs-you": byChange(groups.needsYou),
     running: byChange(running),
     all: [...byChange(groups.needsYou), ...byChange(running), ...byChange(finished)],
+  };
+}
+
+export interface WorkflowBotLanes {
+  readonly needsYou: ReadonlyArray<WorkflowRunNode>;
+  readonly working: ReadonlyArray<WorkflowRunNode>;
+  readonly done: ReadonlyArray<WorkflowRunNode>;
+  readonly closed: ReadonlyArray<WorkflowRunNode>;
+}
+
+/** Bot runs as board lanes. Done and closed hold only the endings of `nowMs`'s local day. */
+export function workflowBotLanes(
+  lists: Readonly<Record<WorkflowListTab, ReadonlyArray<WorkflowRunNode>>>,
+  nowMs: number,
+): WorkflowBotLanes {
+  const isBot = (node: WorkflowRunNode) => node.run.tags?.includes("bot") === true;
+  const needsYou = lists["needs-you"].filter(isBot);
+  const needing = new Set(needsYou.map((node) => node.run.runId));
+  const working = lists.running.filter((node) => isBot(node) && !needing.has(node.run.runId));
+  const startOfTodayMs = DateTime.toEpochMillis(
+    DateTime.startOf(
+      DateTime.makeZonedUnsafe(nowMs, { timeZone: DateTime.zoneMakeLocal() }),
+      "day",
+    ),
+  );
+  const endedToday = (node: WorkflowRunNode) =>
+    node.run.endedAt !== null && Date.parse(node.run.endedAt) >= startOfTodayMs;
+  return {
+    needsYou,
+    working,
+    done: lists.all.filter(
+      (node) => isBot(node) && node.run.status === "completed" && endedToday(node),
+    ),
+    closed: lists.all.filter(
+      (node) =>
+        isBot(node) &&
+        (node.run.status === "stopped" || node.run.status === "cancelled") &&
+        endedToday(node),
+    ),
   };
 }
 
