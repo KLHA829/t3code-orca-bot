@@ -414,6 +414,18 @@ export function workflowBotVisibleConversationNodes(
   return workflowBotConversationNodes(nodes, workflow).slice(-BOT_CHAT_VISIBLE_RUNS);
 }
 
+/** How many cards one bot board lane renders. Newer cards are already first. */
+const BOT_BOARD_VISIBLE_RUNS_PER_LANE = 20;
+
+/** The cards a board lane renders, and how many of its newer-first cards are left for Activity. */
+export function workflowBotLaneWindow(nodes: ReadonlyArray<WorkflowRunNode>): {
+  readonly visible: ReadonlyArray<WorkflowRunNode>;
+  readonly hidden: number;
+} {
+  const visible = nodes.slice(0, BOT_BOARD_VISIBLE_RUNS_PER_LANE);
+  return { visible, hidden: nodes.length - visible.length };
+}
+
 const BOT_HISTORY_RUNS = 8;
 const BOT_HISTORY_TEXT_LIMIT = 2_000;
 const historyText = (value: string) =>

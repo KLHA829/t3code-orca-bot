@@ -3856,3 +3856,61 @@ it.effect("a bot names and tags a direct job before it queues", () =>
     );
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );
+
+it.effect("a bot bounds the memory it journals and prompts with", () =>
+  Effect.gen(function* () {
+    const { boot, agents, directory } = yield* harness();
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const memoryFile = path.join(directory, "MEMORY.md");
+    yield* fileSystem.writeFileString(memoryFile, `old fact\n${"x".repeat(70_000)}`);
+    const helper = bot("helper", {
+      project: "project-1",
+      purpose: "Help with small jobs.",
+      memoryFile,
+    });
+    yield* boot(
+      Effect.gen(function* () {
+        const workflows = yield* Workflows.Workflows;
+        const { runId } = yield* workflows.start(
+          "helper",
+          { message: "hello" },
+          { idempotencyKey: "bot-memory-large" },
+        );
+        const started = yield* agents.started(runId, "respond/0");
+        assert.notInclude(started.prompt, "old fact");
+        yield* agents.end(runId, "respond/0", {
+          output: { summary: "Answered.", response: "Hello." },
+        });
+        yield* workflows.waitFor(runId, status("completed"));
+      }).pipe(Effect.scoped),
+      [helper],
+    );
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);
+
+it.effect("a bot pauses when its purpose file is missing", () =>
+  Effect.gen(function* () {
+    const { boot, directory } = yield* harness();
+    const path = yield* Path.Path;
+    const helper = bot("helper", {
+      project: "project-1",
+      purposeFile: path.join(directory, "missing-SOUL.md"),
+    });
+    yield* boot(
+      Effect.gen(function* () {
+        const workflows = yield* Workflows.Workflows;
+        const { runId } = yield* workflows.start(
+          "helper",
+          { message: "hello" },
+          { idempotencyKey: "bot-missing-purpose" },
+        );
+        const paused = yield* workflows.waitFor(runId, status("paused"));
+        assert.include(paused.detail ?? "", "Could not read the bot's purpose or memory");
+        const context = (yield* workflows.get(runId)).steps.find((step) => step.name === "context");
+        assert.equal(context?.status, "failed");
+      }).pipe(Effect.scoped),
+      [helper],
+    );
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);

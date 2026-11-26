@@ -25,6 +25,7 @@ import {
   workflowBotConversationInput,
   workflowBotConversationNodes,
   workflowBotLanes,
+  workflowBotLaneWindow,
   workflowBotMessageText,
   workflowBotResponseText,
   workflowBotRunTitle,
@@ -351,6 +352,23 @@ describe("the list of runs", () => {
     expect(visible).toHaveLength(50);
     expect(visible[0]?.run.runId).toBe("message-5");
     expect(visible.at(-1)?.run.runId).toBe("message-54");
+  });
+
+  it("keeps only the newest twenty cards visible in one bot board lane", () => {
+    const nodes = Array.from({ length: 24 }, (_, index): WorkflowRunNode => ({
+      run: run(`card-${index}`),
+      children: [],
+      questions: [],
+    }));
+    const windowed = workflowBotLaneWindow(nodes);
+    expect(windowed.visible.map((node) => node.run.runId)).toEqual(
+      Array.from({ length: 20 }, (_, index) => `card-${index}`),
+    );
+    expect(windowed.hidden).toBe(4);
+    expect(workflowBotLaneWindow(nodes.slice(0, 3))).toEqual({
+      visible: nodes.slice(0, 3),
+      hidden: 0,
+    });
   });
 
   it("uses bot-friendly wording for cards and chat statuses", () => {

@@ -59,6 +59,7 @@ import {
   workflowBotConversationInput,
   workflowBotVisibleConversationNodes,
   workflowBotLanes,
+  workflowBotLaneWindow,
   workflowBotMessageText,
   workflowBotResponseText,
   workflowBotRunTitle,
@@ -674,46 +675,56 @@ function BotKanbanBoard({
         ) : null
       ) : (
         <div className="grid min-h-0 flex-1 auto-cols-[minmax(15rem,19rem)] grid-flow-col gap-3 overflow-x-auto bg-muted/25 p-3">
-          {lanes.map((lane) => (
-            <section
-              key={lane.id}
-              aria-label={lane.title}
-              className="flex min-h-0 flex-col rounded-xl border bg-background shadow-xs"
-            >
-              <header className="flex shrink-0 items-center gap-2 border-b px-3 py-2.5">
-                <h3 className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
-                  {lane.title}
-                </h3>
-                <span className="rounded-full bg-accent px-1.5 py-0.5 text-xs text-muted-foreground tabular-nums">
-                  {lane.nodes.length}
-                </span>
-              </header>
-              <ScrollArea className="min-h-0 flex-1">
-                {lane.nodes.length === 0 ? (
-                  <p className="px-3 py-8 text-center text-xs text-muted-foreground">
-                    {lane.id === "needs-you"
-                      ? gt("Nothing needs you.")
-                      : lane.id === "working"
-                        ? gt("Bots are idle.")
-                        : lane.id === "done"
-                          ? gt("Nothing finished today.")
-                          : gt("Nothing closed today.")}
-                  </p>
-                ) : (
-                  <ul className="space-y-2 p-2">
-                    {lane.nodes.map((node) => (
-                      <BotBoardCard
-                        key={node.run.runId}
-                        environmentId={environmentId}
-                        node={node}
-                        onOpen={onOpen}
-                      />
-                    ))}
-                  </ul>
-                )}
-              </ScrollArea>
-            </section>
-          ))}
+          {lanes.map((lane) => {
+            const laneWindow = workflowBotLaneWindow(lane.nodes);
+            return (
+              <section
+                key={lane.id}
+                aria-label={lane.title}
+                className="flex min-h-0 flex-col rounded-xl border bg-background shadow-xs"
+              >
+                <header className="flex shrink-0 items-center gap-2 border-b px-3 py-2.5">
+                  <h3 className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+                    {lane.title}
+                  </h3>
+                  <span className="rounded-full bg-accent px-1.5 py-0.5 text-xs text-muted-foreground tabular-nums">
+                    {lane.nodes.length}
+                  </span>
+                </header>
+                <ScrollArea className="min-h-0 flex-1">
+                  {lane.nodes.length === 0 ? (
+                    <p className="px-3 py-8 text-center text-xs text-muted-foreground">
+                      {lane.id === "needs-you"
+                        ? gt("Nothing needs you.")
+                        : lane.id === "working"
+                          ? gt("Bots are idle.")
+                          : lane.id === "done"
+                            ? gt("Nothing finished today.")
+                            : gt("Nothing closed today.")}
+                    </p>
+                  ) : (
+                    <>
+                      <ul className="space-y-2 p-2">
+                        {laneWindow.visible.map((node) => (
+                          <BotBoardCard
+                            key={node.run.runId}
+                            environmentId={environmentId}
+                            node={node}
+                            onOpen={onOpen}
+                          />
+                        ))}
+                      </ul>
+                      {laneWindow.hidden === 0 ? null : (
+                        <p className="pb-2 text-center text-xs text-muted-foreground tabular-nums">
+                          +{laneWindow.hidden}
+                        </p>
+                      )}
+                    </>
+                  )}
+                </ScrollArea>
+              </section>
+            );
+          })}
         </div>
       )}
     </div>
@@ -963,8 +974,12 @@ function BotBoardCard({
 }) {
   const m = useMessages();
   const { run } = node;
+  const mayHaveReferences =
+    run.tags?.includes("bot:issue") === true || run.tags?.includes("bot:pullRequest") === true;
   const detail = useEnvironmentQuery(
-    serverEnvironment.workflowRun({ environmentId, input: { runId: run.runId } }),
+    mayHaveReferences
+      ? serverEnvironment.workflowRun({ environmentId, input: { runId: run.runId } })
+      : null,
   );
   const references = detail.data?.references ?? [];
   return (

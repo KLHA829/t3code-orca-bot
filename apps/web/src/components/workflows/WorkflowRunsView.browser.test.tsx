@@ -126,18 +126,20 @@ vi.mock(import("../../state/server"), async (original) => {
 // Stands in for the live list and for one run's detail, which the mocked atoms above name.
 vi.mock(import("../../state/query"), async (original) => ({
   ...(await original()),
-  useEnvironmentQuery: ((request: { readonly runId?: string }) => ({
+  useEnvironmentQuery: ((request: { readonly runId?: string } | null) => ({
     data:
-      request === state.live
-        ? state.snapshot
-        : state.detailError !== null
-          ? null
-          : {
-              run: null,
-              steps: state.steps[request.runId ?? ""] ?? [],
-              references: state.references[request.runId ?? ""] ?? [],
-            },
-    error: request === state.live ? null : state.detailError,
+      request === null
+        ? null
+        : request === state.live
+          ? state.snapshot
+          : state.detailError !== null
+            ? null
+            : {
+                run: null,
+                steps: state.steps[request.runId ?? ""] ?? [],
+                references: state.references[request.runId ?? ""] ?? [],
+              },
+    error: request === null || request === state.live ? null : state.detailError,
     isPending: false,
     refresh: vi.fn(),
   })) as never,

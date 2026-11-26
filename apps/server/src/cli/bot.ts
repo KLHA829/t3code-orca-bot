@@ -26,6 +26,9 @@ import {
   withThreadTools,
 } from "./thread.ts";
 
+const stableHash = (value: string) =>
+  NodeCrypto.createHash("sha256").update(value, "utf8").digest("hex").slice(0, 12);
+
 /** The slug of a bot's display name, or undefined when it has no letters or digits. */
 export const botSlug = (name: string) => {
   const separated = name
@@ -34,8 +37,11 @@ export const botSlug = (name: string) => {
     .toLowerCase()
     .replace(/[^\p{L}\p{N}]+/gu, "-")
     .replace(/^-+|-+$/g, "");
-  const slug = Array.from(separated).slice(0, 48).join("").replace(/-+$/g, "");
-  return slug === "" ? undefined : slug;
+  if (separated === "") return undefined;
+  const characters = Array.from(separated);
+  if (characters.length <= 48) return separated;
+  // A hash of the whole slug keeps long names that share their first words apart.
+  return `${characters.slice(0, 35).join("").replace(/-+$/g, "")}-${stableHash(separated)}`;
 };
 
 /**
@@ -49,7 +55,7 @@ export const botFileSlug = (slug: string) => {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
   if (!/[^\x00-\x7f]/.test(slug)) return separated;
-  const hash = NodeCrypto.createHash("sha256").update(slug, "utf8").digest("hex").slice(0, 12);
+  const hash = stableHash(slug);
   const base = Array.from(separated === "" ? "unicode" : separated)
     .slice(0, 35)
     .join("")

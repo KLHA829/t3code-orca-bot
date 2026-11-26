@@ -113,7 +113,8 @@ it.effect("bot slugs are file-safe and bounded", () =>
     assert.match(botFileSlug("助手-bot"), /^bot-[0-9a-f]{12}$/);
     assert.notEqual(botFileSlug("助手"), botFileSlug("幫手"));
     assert.equal(botSlug("Triage 🤖"), "triage");
-    assert.equal(botSlug(`${"a".repeat(60)}-tail`), "a".repeat(48));
+    assert.match(botSlug(`${"a".repeat(60)}-tail`) ?? "", /^a{35}-[0-9a-f]{12}$/);
+    assert.notEqual(botSlug(`${"a".repeat(60)}-tail`), botSlug(`${"a".repeat(60)}-other`));
   }),
 );
 

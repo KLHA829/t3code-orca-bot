@@ -6,6 +6,7 @@ import {
   workflowQuestionKinds,
   workflowRunAsksKind,
   workflowBotLanes,
+  workflowBotLaneWindow,
   workflowRunLists,
   workflowRunNow,
   workflowRunState,
@@ -199,25 +200,33 @@ function EnvironmentBotRuns(props: {
           </Text>
         </View>
       ) : (
-        sections.map((lane) => (
-          <View key={lane.id}>
-            <View
-              accessible
-              accessibilityRole="header"
-              className="flex-row items-center border-b border-border-subtle px-5 pb-1.5 pt-4"
-            >
-              <Text className="min-w-0 flex-1 font-t3-medium text-xs text-foreground-muted">
-                {lane.title}
-              </Text>
-              <Text className="text-xs text-foreground-muted tabular-nums">
-                {lane.nodes.length}
-              </Text>
+        sections.map((lane) => {
+          const laneWindow = workflowBotLaneWindow(lane.nodes);
+          return (
+            <View key={lane.id}>
+              <View
+                accessible
+                accessibilityRole="header"
+                className="flex-row items-center border-b border-border-subtle px-5 pb-1.5 pt-4"
+              >
+                <Text className="min-w-0 flex-1 font-t3-medium text-xs text-foreground-muted">
+                  {lane.title}
+                </Text>
+                <Text className="text-xs text-foreground-muted tabular-nums">
+                  {lane.nodes.length}
+                </Text>
+              </View>
+              {laneWindow.visible.map((node) => (
+                <RunRow key={node.run.runId} node={node} onOpen={props.openRun(node)} />
+              ))}
+              {laneWindow.hidden === 0 ? null : (
+                <Text className="py-2 text-center text-xs text-foreground-muted tabular-nums">
+                  +{laneWindow.hidden}
+                </Text>
+              )}
             </View>
-            {lane.nodes.map((node) => (
-              <RunRow key={node.run.runId} node={node} onOpen={props.openRun(node)} />
-            ))}
-          </View>
-        ))
+          );
+        })
       )}
     </View>
   );

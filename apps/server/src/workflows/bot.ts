@@ -282,14 +282,14 @@ export const bot = (
                   options.purpose ?? "",
                   options.purposeFile === undefined
                     ? ""
-                    : await readOptionalFile(options.purposeFile),
+                    : await NodeFSP.readFile(options.purposeFile, "utf8"),
                 ]
                   .filter((part) => part.trim().length > 0)
                   .join("\n\n"),
                 memory:
                   options.memoryFile === undefined
                     ? ""
-                    : await readOptionalFile(options.memoryFile),
+                    : memoryForPrompt(await readOptionalFile(options.memoryFile)),
               }),
               catch: (cause) => new BotContextReadError({ cause }),
             });

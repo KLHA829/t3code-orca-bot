@@ -297,17 +297,18 @@ export function BotChatModelPickerRouteScreen({ route }: StaticScreenProps<BotCh
     [config, selectedModel],
   );
   const groups = useMemo(() => groupByProvider(options), [options]);
-  const currentSelections = AsyncResult.isSuccess(preferences)
-    ? (preferences.value.botModelSelections ?? {})
-    : {};
   const choose = (selection: ModelSelection | null) => {
-    const next = { ...currentSelections };
-    if (selection === null) {
-      delete next[key];
-    } else {
-      next[key] = selection;
-    }
-    void savePreferences({ botModelSelections: next });
+    void savePreferences({
+      transform: (current) => {
+        const next = { ...current.botModelSelections };
+        if (selection === null) {
+          delete next[key];
+        } else {
+          next[key] = selection;
+        }
+        return { botModelSelections: next };
+      },
+    });
     navigation.goBack();
   };
   return (
